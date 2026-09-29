@@ -12,10 +12,21 @@ Checkpoint = Callable[[dict], None]
 
 @dataclass
 class SubmitResult:
-    """Provider-owned continuation state; the engine persists `state` as opaque JSON."""
+    """`state` is opaque per-run JSON; `file_states` gives each submit_many file its own opaque state."""
 
     state: dict
     submitted: bool = True
+    file_states: dict[str, dict] | None = None
+
+
+@dataclass
+class FileSpec:
+    """One translation's worth of content within a multi-file `submit_many` run."""
+
+    translation_id: str
+    file_name: str
+    strings: dict[str, str]
+    target_locales: list[str]
 
 
 @runtime_checkable
@@ -36,6 +47,21 @@ class Provider(Protocol):
         """Submit (or resume, given a prior partial `state`) strings for translation.
 
         Call `checkpoint(state)` after each remote step to persist progress immediately.
+        """
+        ...
+
+    def submit_many(
+        self,
+        *,
+        run_ref: str,
+        job_name: str,
+        files: list[FileSpec],
+        state: dict | None = None,
+        checkpoint: Checkpoint | None = None,
+    ) -> SubmitResult:
+        """Submit many files as one provider job; set `result.file_states[name]` per file.
+
+        Same `state`/`checkpoint` resumability contract as `submit`.
         """
         ...
 

@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import json
 
-from ..base import SubmitResult
+from ..base import FileSpec, SubmitResult
 from .client import SmartlingClient
+
+DEFAULT_FILES_PER_BATCH = 100
 
 
 def _noop_checkpoint(_state: dict) -> None:
@@ -27,10 +29,14 @@ class SmartlingProvider:
         user_secret: str,
         string_format_paths: str,
         placeholder_format_custom: list[str],
+        files_per_batch: int = DEFAULT_FILES_PER_BATCH,
+        authorize: bool = True,
         version: str = "0.0.0",
     ):
         self.string_format_paths = string_format_paths
         self.placeholder_format_custom = placeholder_format_custom
+        self.files_per_batch = files_per_batch
+        self.authorize = authorize
         self._client = SmartlingClient(base_url, user_identifier, user_secret, project_id, version=version)
 
     def _build_file_content(self, strings: dict[str, str]) -> dict:
@@ -55,32 +61,74 @@ class SmartlingProvider:
         state: dict | None = None,
         checkpoint=None,
     ) -> SubmitResult:
+        # Job names are project-unique in Smartling: fold in the reference (generation id).
+        job_name = f"klaviyo {translation_id} {reference[:8]}"
+        file_spec = FileSpec(translation_id, file_name, strings, target_locales)
+        result = self.submit_many(
+            run_ref=reference, job_name=job_name, files=[file_spec], state=state, checkpoint=checkpoint
+        )
+        # completed_locales/fetch key off "file_uri"; submit_many tracks batches instead.
+        result.state["file_uri"] = file_name
+        return result
+
+    def _file_state(self, file_name: str) -> dict:
+        return {"file_uri": file_name}
+
+    def submit_many(
+        self,
+        *,
+        run_ref: str,
+        job_name: str,
+        files: list[FileSpec],
+        state: dict | None = None,
+        checkpoint=None,
+    ) -> SubmitResult:
         state = dict(state or {})
         checkpoint = checkpoint or _noop_checkpoint
+        files_by_name = {f.file_name: f for f in files}
 
         if not state.get("job_uid"):
-            # Job names are project-unique in Smartling: fold in the generation id.
-            job_name = f"klaviyo {translation_id} {reference[:8]}"
+            all_locales = sorted({locale for f in files for locale in f.target_locales})
             state["job_uid"] = self._client.find_job_by_name(job_name) or self._client.create_job(
                 job_name=job_name,
-                target_locale_ids=target_locales,
-                reference_number=reference,
+                target_locale_ids=all_locales,
+                reference_number=run_ref,
             )
             checkpoint(dict(state))
 
-        if not state.get("batch_uid"):
-            state["batch_uid"] = self._client.create_batch(state["job_uid"], file_name)
+        batches: list[dict] = state.setdefault("batches", [])
+        batched_names = {name for batch in batches for name in batch["file_names"]}
+        unbatched = [f for f in files if f.file_name not in batched_names]
+
+        for start in range(0, len(unbatched), self.files_per_batch):
+            group = unbatched[start : start + self.files_per_batch]
+            batch_uid = self._client.create_batch(
+                state["job_uid"], [f.file_name for f in group], authorize=self.authorize
+            )
+            batches.append({"batch_uid": batch_uid, "file_names": [f.file_name for f in group], "uploaded": []})
             checkpoint(dict(state))
 
-        content = self._build_file_content(strings)
-        # No sort_keys: preserves the "smartling" directives as the first key.
-        self._client.upload_file(state["batch_uid"], file_name, json.dumps(content).encode("utf-8"), target_locales)
-        state["file_uri"] = file_name
-        checkpoint(dict(state))
+        # Iterate every batch (not just new ones) so a crash mid-upload resumes cleanly.
+        for batch in batches:
+            uploaded = set(batch["uploaded"])
+            for name in batch["file_names"]:
+                if name in uploaded:
+                    continue
+                file_spec = files_by_name[name]
+                content = self._build_file_content(file_spec.strings)
+                # No sort_keys: preserves the "smartling" directives as the first key.
+                self._client.upload_file(
+                    batch["batch_uid"], name, json.dumps(content).encode("utf-8"), file_spec.target_locales,
+                    authorize=self.authorize,
+                )
+                batch["uploaded"].append(name)
+                checkpoint(dict(state))
 
-        self._client.poll_batch(state["batch_uid"])
+        for batch in batches:
+            self._client.poll_batch(batch["batch_uid"])
 
-        return SubmitResult(state=state, submitted=True)
+        file_states = {f.file_name: self._file_state(f.file_name) for f in files}
+        return SubmitResult(state=state, submitted=True, file_states=file_states)
 
     def completed_locales(self, state: dict) -> list[str]:
         status = self._client.get_file_status(state["file_uri"])

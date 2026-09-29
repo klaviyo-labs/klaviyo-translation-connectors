@@ -1,4 +1,6 @@
-"""SQLite-backed sync state: generations (push attempts), written values, pull stats."""
+"""SQLite-backed sync state: runs (job/scope attempts), generations (per-translation
+pushes within a run), written values, pull stats.
+"""
 from __future__ import annotations
 
 import json
@@ -9,6 +11,18 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS runs (
+    id TEXT PRIMARY KEY,
+    job_name TEXT NOT NULL,
+    scope_key TEXT NOT NULL,
+    scope_description TEXT NOT NULL,
+    provider_state TEXT,
+    status TEXT NOT NULL,
+    created_at REAL NOT NULL,
+    updated_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_runs_scope_key ON runs(scope_key);
+
 CREATE TABLE IF NOT EXISTS generations (
     id TEXT PRIMARY KEY,
     translation_id TEXT NOT NULL,
@@ -17,10 +31,12 @@ CREATE TABLE IF NOT EXISTS generations (
     locales TEXT NOT NULL,
     status TEXT NOT NULL,
     provider_state TEXT,
+    run_id TEXT,
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_generations_translation ON generations(translation_id);
+CREATE INDEX IF NOT EXISTS idx_generations_run ON generations(run_id);
 
 CREATE TABLE IF NOT EXISTS written (
     translation_id TEXT NOT NULL,
@@ -52,6 +68,20 @@ def _row_to_generation(row: sqlite3.Row) -> dict[str, Any]:
         "locales": json.loads(row["locales"]),
         "status": row["status"],
         "provider_state": json.loads(row["provider_state"]) if row["provider_state"] else None,
+        "run_id": row["run_id"],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def _row_to_run(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "job_name": row["job_name"],
+        "scope_key": row["scope_key"],
+        "scope_description": row["scope_description"],
+        "provider_state": json.loads(row["provider_state"]) if row["provider_state"] else None,
+        "status": row["status"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
@@ -63,18 +93,70 @@ class State:
         self.conn = sqlite3.connect(path)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
+        self._migrate()
         self.conn.commit()
 
+    def _migrate(self) -> None:
+        # A generations table created before `runs` existed lacks this column.
+        try:
+            self.conn.execute("ALTER TABLE generations ADD COLUMN run_id TEXT")
+        except sqlite3.OperationalError:
+            pass
+
+    # -- Runs ---------------------------------------------------------------
+
+    def create_run(self, run_id: str, job_name: str, scope_key: str, scope_description: str) -> str:
+        now = time.time()
+        self.conn.execute(
+            "INSERT INTO runs (id, job_name, scope_key, scope_description, status, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, 'pending', ?, ?)",
+            (run_id, job_name, scope_key, scope_description, now, now),
+        )
+        self.conn.commit()
+        return run_id
+
+    def get_run(self, run_id: str) -> dict | None:
+        row = self.conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+        return _row_to_run(row) if row else None
+
+    def get_pending_run(self, scope_key: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM runs WHERE scope_key = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
+            (scope_key,),
+        ).fetchone()
+        return _row_to_run(row) if row else None
+
+    def set_run_provider_state(self, run_id: str, provider_state: dict) -> None:
+        self.conn.execute(
+            "UPDATE runs SET provider_state = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(provider_state), time.time(), run_id),
+        )
+        self.conn.commit()
+
+    def set_run_status(self, run_id: str, status: str) -> None:
+        self.conn.execute(
+            "UPDATE runs SET status = ?, updated_at = ? WHERE id = ?", (status, time.time(), run_id)
+        )
+        self.conn.commit()
+
+    def list_generations_for_run(self, run_id: str) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM generations WHERE run_id = ? ORDER BY created_at", (run_id,)
+        ).fetchall()
+        return [_row_to_generation(row) for row in rows]
+
+    # -- Generations ----------------------------------------------------------
+
     def create_generation(
-        self, translation_id: str, file_name: str, sent_snapshot: dict, locales: dict
+        self, translation_id: str, file_name: str, sent_snapshot: dict, locales: dict, run_id: str | None = None
     ) -> str:
         gen_id = str(uuid.uuid4())
         now = time.time()
         self.conn.execute(
             "INSERT INTO generations "
-            "(id, translation_id, file_name, sent_snapshot, locales, status, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)",
-            (gen_id, translation_id, file_name, json.dumps(sent_snapshot), json.dumps(locales), now, now),
+            "(id, translation_id, file_name, sent_snapshot, locales, status, run_id, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)",
+            (gen_id, translation_id, file_name, json.dumps(sent_snapshot), json.dumps(locales), run_id, now, now),
         )
         self.conn.commit()
         return gen_id

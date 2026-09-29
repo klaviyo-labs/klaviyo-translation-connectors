@@ -8,7 +8,7 @@ htmlcov/
 build/
 dist/
 
-# local state and config (contain project ids / project-local paths, not secrets, but keep out of git anyway)
+# local state and config (contains account-specific ids, not secrets, but keep out of git anyway)
 .klaviyo-tc/
-klaviyo-tc.toml
+config.yaml
 .env

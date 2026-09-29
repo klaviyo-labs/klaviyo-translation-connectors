@@ -80,10 +80,11 @@ def test_push_builds_exact_file_and_submits(project, runner):
     assert generation is not None
     assert generation["status"] == "submitted"
 
+    run = state.get_run(generation["run_id"])
     job_body = json.loads(job_route.calls.last.request.content)
-    assert job_body["jobName"] == f"klaviyo {TRANSLATION_ID} {generation['id'][:8]}"
+    assert job_body["jobName"] == run["job_name"]
     assert sorted(job_body["targetLocaleIds"]) == ["es-ES", "fr-FR"]
-    assert job_body["referenceNumber"] == generation["id"]
+    assert job_body["referenceNumber"] == run["id"]
     assert generation["sent_snapshot"] == {
         f"{TRANSLATION_ID}::subject": "Hello {{ first_name }}",
         f"{TRANSLATION_ID}::body": "Welcome!",
@@ -98,7 +99,9 @@ def test_push_dry_run_makes_no_writes(project, runner):
     result = runner.invoke(cli, ["push", "--id", TRANSLATION_ID, "--dry-run"])
     assert result.exit_code == 0, result.output
 
-    printed = json.loads(result.output)
+    prefix, _, rest = result.output.partition("\n")
+    assert prefix == f"{TRANSLATION_ID}:"
+    printed = json.loads(rest)
     assert printed == {
         f"{TRANSLATION_ID}::subject": "Hello {{ first_name }}",
         f"{TRANSLATION_ID}::body": "Welcome!",
@@ -163,8 +166,9 @@ def test_push_resume_after_batch_creation_fails_reuses_the_same_job(project, run
 
     state = State(".klaviyo-tc/state.db")
     generation = state.get_active_generation(TRANSLATION_ID)
-    assert generation["provider_state"]["job_uid"] == "job-1"
-    assert generation["provider_state"]["batch_uid"] == "batch-1"
+    run = state.get_run(generation["run_id"])
+    assert run["provider_state"]["job_uid"] == "job-1"
+    assert run["provider_state"]["batches"][0]["batch_uid"] == "batch-1"
 
 
 @respx.mock
@@ -173,14 +177,13 @@ def test_push_adopts_existing_job_found_by_name_instead_of_creating_a_new_one(pr
     mock_klaviyo_get_translation(respx, TRANSLATION_ID, target_locales=["fr", "es"], values=VALUES)
     mock_smartling_auth(respx)
 
+    # Simulates a lost checkpoint: the run row and job name exist, but provider_state does not.
     state = State(".klaviyo-tc/state.db")
-    generation_id = state.create_generation(
-        TRANSLATION_ID,
-        FILE_NAME,
-        {f"{TRANSLATION_ID}::subject": "Hello {{ first_name }}", f"{TRANSLATION_ID}::body": "Welcome!"},
-        {"fr": "fr-FR", "es": "es-ES"},
+    scope_key = f"id:{TRANSLATION_ID}"
+    expected_job_name = "klaviyo bulk existing-run"
+    run_id = state.create_run(
+        "11111111-1111-1111-1111-111111111111", expected_job_name, scope_key, "1 translation id(s)"
     )
-    expected_job_name = f"klaviyo {TRANSLATION_ID} {generation_id[:8]}"
 
     job_search_route = respx.get(f"{SMARTLING_BASE}/jobs-api/v3/projects/{PROJECT_ID}/jobs").respond(
         json={
@@ -208,8 +211,10 @@ def test_push_adopts_existing_job_found_by_name_instead_of_creating_a_new_one(pr
     batch_body = json.loads(batch_route.calls.last.request.content)
     assert batch_body["translationJobUid"] == "adopted-job"
 
-    generation = state.get_generation(generation_id)
-    assert generation["provider_state"]["job_uid"] == "adopted-job"
+    generation = state.get_active_generation(TRANSLATION_ID)
+    assert generation["run_id"] == run_id
+    run = state.get_run(run_id)
+    assert run["provider_state"]["job_uid"] == "adopted-job"
 
 
 @respx.mock

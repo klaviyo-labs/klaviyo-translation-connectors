@@ -20,7 +20,7 @@ def test_init_writes_template_and_is_idempotent(tmp_path, monkeypatch, runner):
     monkeypatch.chdir(tmp_path)
     result = runner.invoke(cli, ["init"])
     assert result.exit_code == 0, result.output
-    config_path = tmp_path / "klaviyo-tc.toml"
+    config_path = tmp_path / "config.yaml"
     assert config_path.exists()
     original = config_path.read_text()
 
@@ -36,10 +36,10 @@ def test_status_with_no_translations_tracked(project, runner):
     assert "no translations tracked yet" in result.output
 
 
-def test_push_requires_id_or_all(project, runner):
+def test_push_requires_a_scope_selector(project, runner):
     result = runner.invoke(cli, ["push"])
     assert result.exit_code != 0
-    assert "--id or --all" in result.output
+    assert "--id, --all, --campaign/--flow, or --tag" in result.output
 
 
 def test_push_id_and_all_are_mutually_exclusive(project, runner):
@@ -87,9 +87,15 @@ def test_push_all_uses_channel_filter_and_lists_cursor_pages(project, runner):
 
     result = runner.invoke(cli, ["push", "--all", "--channel", "email"])
     assert result.exit_code == 0, result.output
-    assert f"{TRANSLATION_ID_1}: submitted" in result.output
-    assert f"{TRANSLATION_ID_2}: submitted" in result.output
+    assert "submitted files: 2" in result.output
+    assert "Klaviyo bulk" in result.output
     assert list_route.calls.call_count == 2
+
+    from klaviyo_tc.core.state import State
+
+    state = State(".klaviyo-tc/state.db")
+    assert state.get_active_generation(TRANSLATION_ID_1) is not None
+    assert state.get_active_generation(TRANSLATION_ID_2) is not None
 
     import urllib.parse
 

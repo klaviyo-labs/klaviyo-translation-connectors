@@ -9,6 +9,8 @@ class Provider(Protocol):
 
     def submit(self, *, translation_id, file_name, strings, target_locales,
                reference, state=None, checkpoint=None) -> SubmitResult: ...
+    def submit_many(self, *, run_ref, job_name, files: list[FileSpec],
+                     state=None, checkpoint=None) -> SubmitResult: ...
     def completed_locales(self, state: dict) -> list[str]: ...
     def fetch(self, state: dict, locale: str) -> dict[str, str]: ...
 ```
@@ -29,6 +31,17 @@ class Provider(Protocol):
   remotely. `checkpoint` may be `None` in tests; guard for that. Set
   `SubmitResult.submitted = False` if more `submit` calls are still needed
   before the engine should consider the push complete.
+- `submit_many` submits a whole scope run (campaign/flow/tag/`--all`/multiple
+  `--id`) as **one** provider job instead of one job per translation. `files`
+  is a list of `FileSpec(translation_id, file_name, strings, target_locales)`.
+  `run_ref` and `state`/`checkpoint` mirror `submit`'s resumability contract,
+  but at the run level (e.g. job id, per-batch upload progress). Set
+  `SubmitResult.file_states[file_name]` for every file: it's the opaque state
+  `completed_locales`/`fetch` will later receive for that one translation's
+  generation -- the run-level `state` may hold bookkeeping (job/batch ids)
+  that has nothing to do with any single file, so the engine never reuses it
+  directly. `submit` may implement itself via `submit_many` with a single
+  `FileSpec` (see `SmartlingProvider.submit` for a worked example).
 - `completed_locales` reports which of the submitted locales have translations
   ready to download, given the same `state` dict.
 - `fetch` returns the translated strings for one locale. Keys absent or empty
@@ -44,14 +57,16 @@ envelopes, directives, auth) -- none of that belongs in `klaviyo_tc.core`.
    worked example: `client.py` is the plain REST client, `provider.py`
    adapts it to the protocol).
 2. Register it in `klaviyo_tc/providers/registry.py`.
-3. Add a `[providers.<name>]` table to the config schema
-   (`klaviyo_tc/core/config.py`) for whatever settings your API needs
-   (project id, format directives, etc.) -- never secrets.
+3. Add a `providers.<name>` section to the config schema
+   (`klaviyo_tc/core/config.py`'s `TEMPLATE`, mirrored in `config.example.yaml`)
+   for whatever settings your API needs (project id, format directives, etc.)
+   -- never secrets; `load_config` rejects any key that looks like one.
 4. Wire secret env vars and construction for your provider in
    `klaviyo_tc.cli.Context.provider`.
 5. Add tests (`click.testing.CliRunner` driving the CLI against `respx`-mocked
    HTTP) asserting on the requests your provider makes and on the resulting
-   state, mirroring `tests/test_push.py` / `tests/test_pull.py`.
+   state, mirroring `tests/test_push.py` / `tests/test_pull.py` /
+   `tests/test_scoped_bulk_sync.py`.
 
 Nothing else changes: the sync engine, outcome classification (`unchanged`,
 `conflict`, `stale_source`, `placeholder_mismatch`, `deleted`, `unknown_key`),

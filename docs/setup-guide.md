@@ -22,6 +22,8 @@ Plan on about 30 minutes, most of it spent creating credentials.
 1. In Klaviyo, open **Settings → API keys** and create a **private** API key.
 2. Give it **custom scopes**, with at least:
    - **Translations:** Read and Write (`translations:read`, `translations:write`).
+   - Optionally, to sync by campaign/flow/tag/template instead of listing ids
+     yourself: `campaigns:read`, `flows:read`, `tags:read`, `templates:read`.
 3. Copy the key. It starts with `pk_`, and it's shown only once.
 
 Use a dedicated key for this tool, so you can revoke it on its own.
@@ -55,25 +57,31 @@ To work on the code itself, clone the repo and run `.venv/bin/pip install -e ".[
 In the directory where you'll run the tool:
 
 ```bash
-.venv/bin/klaviyo-tc init        # writes klaviyo-tc.toml
+cp config.example.yaml config.yaml      # or: .venv/bin/klaviyo-tc init
 ```
 
-Then edit `klaviyo-tc.toml`:
+Then edit `config.yaml`:
 
-```toml
-[providers.smartling]
-project_id = "abc123def"          # from step 3
+```yaml
+providers:
+  smartling:
+    project_id: abc123def          # from step 3
 
-[locales]                          # Klaviyo locale = Smartling locale
-fr = "fr-FR"
-de = "de-DE"
-es = "es-ES"
+locales:                            # Klaviyo locale: Smartling locale
+  fr: fr-FR
+  de: de-DE
+  es: es-ES
 ```
 
-- The keys under `[locales]` are Klaviyo locale codes, as they appear in a translation's `target_locales`.
+- The keys under `locales:` are Klaviyo locale codes, as they appear in a translation's `target_locales`.
 - The values are the Smartling locale IDs for your project.
 - Only mapped locales are sent or pulled.
 - Leave the other settings at their defaults unless you have a reason to change them.
+- `config.yaml` is git-ignored (it holds account-specific ids); commit
+  `config.example.yaml` instead if you want to share defaults with a team.
+- The tool refuses to load a config file with a key that looks like a secret
+  (`api_key`, `secret`, `token`, etc. anywhere in it) -- secrets only ever
+  come from the environment variables in the next section.
 
 Secrets **never** go in the config file. Export them as environment variables:
 
@@ -162,12 +170,56 @@ The environment variables must be available to the cron job, for example through
 
 Ephemeral CI runners such as GitHub Actions don't keep files between runs. If you use one, save and restore `.klaviyo-tc/state.db` yourself: as a cache or artifact, or in object storage. Otherwise every run starts with no history, and conflict protection can't work.
 
+## Sync a whole campaign / flow / tag / template
+
+Instead of listing translation ids yourself (step 7), you can point `push`/`pull`/`status`
+at a campaign, a flow, a tag, a template, or universal content, and the tool resolves the
+translations for you:
+
+```bash
+.venv/bin/klaviyo-tc push --campaign 01ABC...                # one campaign
+.venv/bin/klaviyo-tc push --campaign 01ABC... --flow 01DEF... # combine campaigns and flows
+.venv/bin/klaviyo-tc push --tag "Spring Launch"               # every tagged campaign and flow
+.venv/bin/klaviyo-tc push --templates --name-contains "Sale"  # every template matching a filter
+.venv/bin/klaviyo-tc push --all-universal-content              # every universal content block
+```
+
+A scoped `push` submits everything it resolves as **one** Smartling job, not one job per
+translation, and skips any translation whose content hasn't changed since its last submitted
+push (pass `--force-resend` to override that). `--create-missing` creates a Klaviyo translation
+for a resolved campaign/flow/template/universal-content resource that doesn't have one yet;
+without it, resources with no translation are reported as `no_translation` and left alone.
+`--template`/`--templates` translations default to the `email` channel; pass
+`--template-channel whatsapp` for WhatsApp templates. A `SIMPLE`/`CODE` template is still
+synced, but flagged `single_html_body` in the summary since it stores one HTML body value
+rather than per-string content.
+
+Two caveats worth knowing before you rely on the campaign/flow/tag side of this:
+
+- **The Klaviyo Campaigns API used here is beta**, like Translations itself; its shape can
+  change under you. Templates use Klaviyo's GA Templates API instead.
+- The campaign → campaign-message → campaign-variation and flow → flow-action → flow-message
+  traversal, and the tag → campaigns/flows relationship lookups, follow Klaviyo's general
+  JSON:API conventions but were **not individually verified against a live account**. If a
+  request 404s or comes back empty where you expect data, check
+  [`klaviyo_tc/klaviyo.py`](../src/klaviyo_tc/klaviyo.py) and
+  [`klaviyo_tc/scopes.py`](../src/klaviyo_tc/scopes.py) for the exact paths in use, and please
+  open an issue (or a PR) with what you found on your account.
+
+Flows, tags, and templates are GA APIs and use their own Klaviyo API revision, independent of
+`klaviyo.revision` used for campaigns and translations; see `klaviyo.revisions` in
+`config.yaml` if Klaviyo ships a newer one.
+
+By default, `push` authorizes the Smartling job for your mapped locales as it uploads each
+file. Pass `--no-authorize` (or set `providers.smartling.authorize: false` in `config.yaml`)
+to create the job unauthorized instead, and authorize it by hand in Smartling.
+
 ## Troubleshooting
 
 | Symptom | Likely cause |
 |---|---|
 | `401` / `403` from Klaviyo | The key is missing the `translations:read`/`write` scopes, or your account doesn't have the Translations beta |
-| `locale 'xx' not enabled on translation, skipping` | Enable that locale on the Klaviyo translation (step 4), or remove it from `[locales]` |
+| `locale 'xx' not enabled on translation, skipping` | Enable that locale on the Klaviyo translation (step 4), or remove it from `locales:` |
 | Smartling authentication error | Wrong User Identifier or Token Secret, or the token was revoked |
 | Smartling `429` | Rate limited. The tool retries with backoff; for large pushes, push fewer translations at a time |
 | Many `stale_source` outcomes | The source was edited after pushing. Push again, then pull after the new strings are translated |

@@ -360,9 +360,10 @@ def test_pull_records_written_per_chunk_so_a_later_chunk_failure_keeps_earlier_w
 
 @respx.mock
 def test_pull_no_submitted_generation_is_skipped(project, runner):
-    result = runner.invoke(cli, ["pull", "--id", "campaign-variation::email::never-pushed"])
+    result = runner.invoke(cli, ["pull", "--id", "campaign-variation::email::never-pushed", "--verbose"])
     assert result.exit_code == 0, result.output
     assert "no submitted generation" in result.output
+    assert "nothing to do" in result.output
 
 
 @respx.mock
