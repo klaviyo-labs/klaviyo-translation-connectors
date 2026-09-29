@@ -47,7 +47,7 @@ The tool isn't published to PyPI yet. Install it from GitHub into a virtual envi
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install "git+https://github.com/samviyo/klaviyo-translation-connectors"
+.venv/bin/pip install "git+https://github.com/wannabefro/klaviyo-translation-connectors"
 ```
 
 To work on the code itself, clone the repo and run `.venv/bin/pip install -e ".[dev]"` instead.
