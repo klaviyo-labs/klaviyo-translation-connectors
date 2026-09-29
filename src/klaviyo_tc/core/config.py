@@ -45,6 +45,7 @@ providers:
     project_id: "your-project-id"
     account_uid: ""            # optional; future webhook use
     authorize: true             # false: create unauthorized jobs
+    workflow_uid: ""            # optional; authorize into this workflow instead of the locale default
     files_per_batch: 100
     string_format_paths: "html: *"
     # Sent to Smartling verbatim; our own parser ignores this.

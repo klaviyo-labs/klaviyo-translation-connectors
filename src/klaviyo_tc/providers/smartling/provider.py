@@ -31,12 +31,14 @@ class SmartlingProvider:
         placeholder_format_custom: list[str],
         files_per_batch: int = DEFAULT_FILES_PER_BATCH,
         authorize: bool = True,
+        workflow_uid: str | None = None,
         version: str = "0.0.0",
     ):
         self.string_format_paths = string_format_paths
         self.placeholder_format_custom = placeholder_format_custom
         self.files_per_batch = files_per_batch
         self.authorize = authorize
+        self.workflow_uid = workflow_uid or None
         self._client = SmartlingClient(base_url, user_identifier, user_secret, project_id, version=version)
 
     def _build_file_content(self, strings: dict[str, str]) -> dict:
@@ -103,7 +105,11 @@ class SmartlingProvider:
         for start in range(0, len(unbatched), self.files_per_batch):
             group = unbatched[start : start + self.files_per_batch]
             batch_uid = self._client.create_batch(
-                state["job_uid"], [f.file_name for f in group], authorize=self.authorize
+                state["job_uid"],
+                [f.file_name for f in group],
+                authorize=self.authorize,
+                locale_ids=sorted({locale for f in group for locale in f.target_locales}),
+                workflow_uid=self.workflow_uid,
             )
             batches.append({"batch_uid": batch_uid, "file_names": [f.file_name for f in group], "uploaded": []})
             checkpoint(dict(state))

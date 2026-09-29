@@ -142,12 +142,20 @@ class SmartlingClient:
                 return item.get("translationJobUid")
         return None
 
-    def create_batch(self, translation_job_uid: str, file_uris: list[str], authorize: bool = True) -> str:
-        data = self._call(
-            "POST",
-            f"/job-batches-api/v2/projects/{self.project_id}/batches",
-            json={"authorize": authorize, "translationJobUid": translation_job_uid, "fileUris": list(file_uris)},
-        )
+    def create_batch(
+        self,
+        translation_job_uid: str,
+        file_uris: list[str],
+        authorize: bool = True,
+        locale_ids: list[str] | None = None,
+        workflow_uid: str | None = None,
+    ) -> str:
+        body = {"authorize": authorize, "translationJobUid": translation_job_uid, "fileUris": list(file_uris)}
+        if authorize and workflow_uid:
+            body["localeWorkflows"] = [
+                {"targetLocaleId": locale, "workflowUid": workflow_uid} for locale in locale_ids or []
+            ]
+        data = self._call("POST", f"/job-batches-api/v2/projects/{self.project_id}/batches", json=body)
         return data["batchUid"]
 
     def upload_file(

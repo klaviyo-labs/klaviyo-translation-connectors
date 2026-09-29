@@ -92,6 +92,7 @@ class Context:
                     placeholder_format_custom=provider_config["placeholder_format_custom"],
                     files_per_batch=provider_config.get("files_per_batch", 100),
                     authorize=provider_config.get("authorize", True),
+                    workflow_uid=provider_config.get("workflow_uid") or None,
                     version=__version__,
                 )
             else:

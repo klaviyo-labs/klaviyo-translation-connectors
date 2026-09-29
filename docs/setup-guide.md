@@ -214,6 +214,11 @@ By default, `push` authorizes the Smartling job for your mapped locales as it up
 file. Pass `--no-authorize` (or set `providers.smartling.authorize: false` in `config.yaml`)
 to create the job unauthorized instead, and authorize it by hand in Smartling.
 
+To authorize into a specific Smartling workflow (for example a machine-translation workflow)
+rather than each locale's default, set `providers.smartling.workflow_uid` in `config.yaml`.
+Find the workflow UID in Smartling under **Project Settings → Workflows**. It applies to every
+mapped locale, and is ignored when the job is created unauthorized.
+
 ## Troubleshooting
 
 | Symptom | Likely cause |
