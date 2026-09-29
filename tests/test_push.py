@@ -389,3 +389,38 @@ def test_push_fails_when_batch_completes_with_a_failed_file(project, runner):
 
     state = State(".klaviyo-tc/state.db")
     assert state.get_active_generation(TRANSLATION_ID) is None
+
+
+@respx.mock
+def test_push_treats_empty_json_string_errors_as_success(project, runner):
+    # Shape captured from a live Smartling batch: errors arrive as the string '{}'.
+    mock_klaviyo_get_translation(respx, TRANSLATION_ID, target_locales=["fr"], values=VALUES)
+    mock_smartling_auth(respx)
+    mock_smartling_no_job_found(respx)
+    respx.post(f"{SMARTLING_BASE}/jobs-api/v3/projects/{PROJECT_ID}/jobs").respond(
+        json={"response": {"code": "SUCCESS", "data": {"translationJobUid": "job-1"}}}
+    )
+    respx.post(f"{SMARTLING_BASE}/job-batches-api/v2/projects/{PROJECT_ID}/batches").respond(
+        json={"response": {"code": "SUCCESS", "data": {"batchUid": "batch-1"}}}
+    )
+    respx.post(f"{SMARTLING_BASE}/job-batches-api/v2/projects/{PROJECT_ID}/batches/batch-1/file").respond(
+        json={"response": {"code": "SUCCESS", "data": {}}}
+    )
+    respx.get(f"{SMARTLING_BASE}/job-batches-api/v2/projects/{PROJECT_ID}/batches/batch-1").respond(
+        json={
+            "response": {
+                "code": "SUCCESS",
+                "data": {
+                    "status": "COMPLETED",
+                    "generalErrors": "{}",
+                    "files": [{"fileUri": FILE_NAME, "status": "COMPLETED", "errors": "{}"}],
+                },
+            }
+        }
+    )
+
+    result = runner.invoke(cli, ["push", "--id", TRANSLATION_ID])
+    assert result.exit_code == 0, result.output
+
+    state = State(".klaviyo-tc/state.db")
+    assert state.get_active_generation(TRANSLATION_ID) is not None

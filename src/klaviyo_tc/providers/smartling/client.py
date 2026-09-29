@@ -25,10 +25,17 @@ class SmartlingError(Exception):
         self.detail = detail
 
 
+def _has_errors(value) -> bool:
+    # Batch status sends errors as JSON-encoded strings, so success reads '{}', not an empty value.
+    if isinstance(value, str):
+        return value.strip() not in ("", "{}", "[]", "null")
+    return bool(value)
+
+
 def _file_failed(file_info: dict) -> bool:
     if file_info.get("status") in FAILURE_FILE_STATUSES:
         return True
-    return bool(file_info.get("errors"))
+    return _has_errors(file_info.get("errors"))
 
 
 def _retry_delay(response: httpx.Response, attempt: int) -> float:
@@ -182,9 +189,9 @@ class SmartlingClient:
             data = self.get_batch_status(batch_uid)
             status = data.get("status")
             if status == "COMPLETED":
-                general_errors = data.get("generalErrors") or []
+                general_errors = data.get("generalErrors")
                 failed_files = [f for f in data.get("files", []) if _file_failed(f)]
-                if general_errors or failed_files:
+                if _has_errors(general_errors) or failed_files:
                     raise SmartlingError(
                         None, f"batch {batch_uid} completed with errors: general={general_errors} files={failed_files}"
                     )
