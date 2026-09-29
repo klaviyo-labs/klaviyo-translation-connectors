@@ -5,6 +5,7 @@ here; the sync engine never sees them.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 
 from ..base import FileSpec, SubmitResult
@@ -15,6 +16,23 @@ DEFAULT_FILES_PER_BATCH = 100
 
 def _noop_checkpoint(_state: dict) -> None:
     pass
+
+
+def _needs_new_batch(batches: list[dict], name: str, digest: str) -> bool:
+    """True if a file was never batched, or its last upload holds content that has since changed."""
+    last_digest = None
+    uploaded_somewhere = False
+    for batch in batches:
+        if name not in batch["file_names"]:
+            continue
+        if name not in batch["uploaded"]:
+            return False  # still queued in an open batch; the upload loop sends current content
+        uploaded_somewhere = True
+        last_digest = batch.get("digests", {}).get(name)
+    if not uploaded_somewhere:
+        return True
+    # State from before digests were recorded can't be compared; treat it as current.
+    return last_digest is not None and last_digest != digest
 
 
 class SmartlingProvider:
@@ -36,6 +54,8 @@ class SmartlingProvider:
     ):
         self.string_format_paths = string_format_paths
         self.placeholder_format_custom = placeholder_format_custom
+        if not isinstance(files_per_batch, int) or isinstance(files_per_batch, bool) or files_per_batch < 1:
+            raise ValueError(f"files_per_batch must be a positive integer, got {files_per_batch!r}")
         self.files_per_batch = files_per_batch
         self.authorize = authorize
         self.workflow_uid = workflow_uid or None
@@ -99,11 +119,16 @@ class SmartlingProvider:
             checkpoint(dict(state))
 
         batches: list[dict] = state.setdefault("batches", [])
-        batched_names = {name for batch in batches for name in batch["file_names"]}
-        unbatched = [f for f in files if f.file_name not in batched_names]
+        payloads = {
+            # No sort_keys: preserves the "smartling" directives as the first key.
+            f.file_name: json.dumps(self._build_file_content(f.strings)).encode("utf-8")
+            for f in files
+        }
+        digests = {name: hashlib.blake2b(payload, digest_size=16).hexdigest() for name, payload in payloads.items()}
+        needs_batch = [f for f in files if _needs_new_batch(batches, f.file_name, digests[f.file_name])]
 
-        for start in range(0, len(unbatched), self.files_per_batch):
-            group = unbatched[start : start + self.files_per_batch]
+        for start in range(0, len(needs_batch), self.files_per_batch):
+            group = needs_batch[start : start + self.files_per_batch]
             batch_uid = self._client.create_batch(
                 state["job_uid"],
                 [f.file_name for f in group],
@@ -111,23 +136,24 @@ class SmartlingProvider:
                 locale_ids=sorted({locale for f in group for locale in f.target_locales}),
                 workflow_uid=self.workflow_uid,
             )
-            batches.append({"batch_uid": batch_uid, "file_names": [f.file_name for f in group], "uploaded": []})
+            batches.append(
+                {"batch_uid": batch_uid, "file_names": [f.file_name for f in group], "uploaded": [], "digests": {}}
+            )
             checkpoint(dict(state))
 
         # Iterate every batch (not just new ones) so a crash mid-upload resumes cleanly.
         for batch in batches:
             uploaded = set(batch["uploaded"])
             for name in batch["file_names"]:
-                if name in uploaded:
+                # A file that left the scope since the crash stays unuploaded in its old batch.
+                if name in uploaded or name not in files_by_name:
                     continue
-                file_spec = files_by_name[name]
-                content = self._build_file_content(file_spec.strings)
-                # No sort_keys: preserves the "smartling" directives as the first key.
                 self._client.upload_file(
-                    batch["batch_uid"], name, json.dumps(content).encode("utf-8"), file_spec.target_locales,
+                    batch["batch_uid"], name, payloads[name], files_by_name[name].target_locales,
                     authorize=self.authorize,
                 )
                 batch["uploaded"].append(name)
+                batch.setdefault("digests", {})[name] = digests[name]
                 checkpoint(dict(state))
 
         for batch in batches:

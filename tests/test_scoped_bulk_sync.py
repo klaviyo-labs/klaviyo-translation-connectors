@@ -540,6 +540,10 @@ def test_push_campaign_falls_back_to_omni_variations_when_ga_campaign_is_missing
     )
     mock_klaviyo_campaign_variations(respx, "msg-1", [{"id": "var-a"}])
     mock_klaviyo_find_translation_for_resource(respx, "var-a", var_id)
+    mock_klaviyo_get_translation(
+        respx, var_id, target_locales=["fr"],
+        values=[{"id": f"{var_id}::subject", "source_value": "Hi", "translations": {}}],
+    )
 
     result = runner.invoke(cli, ["push", "--campaign", campaign_id, "--dry-run"])
     assert result.exit_code == 0, result.output

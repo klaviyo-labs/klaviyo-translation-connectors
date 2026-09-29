@@ -328,14 +328,16 @@ def push_scope(
     )
     state.set_run_provider_state(run_id, submit_result.state)
     if submit_result.submitted:
-        state.set_run_status(run_id, "submitted")
         file_states = submit_result.file_states or {}
-        for translation_id, strings, included, skipped in to_submit:
-            generation = generations[translation_id]
-            file_name = _file_name_for(translation_id)
-            # Never inspect provider-owned state shapes here: the provider decides them.
-            state.set_provider_state(generation["id"], file_states.get(file_name, {}))
-            state.set_status(generation["id"], "submitted")
+        # Never inspect provider-owned state shapes here: the provider decides them.
+        state.finalize_run(
+            run_id,
+            {
+                generations[translation_id]["id"]: file_states.get(_file_name_for(translation_id), {})
+                for translation_id, _strings, _included, _skipped in to_submit
+            },
+        )
+        for translation_id, _strings, _included, skipped in to_submit:
             result.submitted_files += 1
             result.items.append(BulkPushItem(translation_id, "submitted", skipped_locales=skipped))
 

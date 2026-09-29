@@ -36,7 +36,6 @@ CREATE TABLE IF NOT EXISTS generations (
     updated_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_generations_translation ON generations(translation_id);
-CREATE INDEX IF NOT EXISTS idx_generations_run ON generations(run_id);
 
 CREATE TABLE IF NOT EXISTS written (
     translation_id TEXT NOT NULL,
@@ -102,6 +101,8 @@ class State:
             self.conn.execute("ALTER TABLE generations ADD COLUMN run_id TEXT")
         except sqlite3.OperationalError:
             pass
+        # Created here, not in SCHEMA, so it runs after the column exists on upgraded databases.
+        self.conn.execute("CREATE INDEX IF NOT EXISTS idx_generations_run ON generations(run_id)")
 
     # -- Runs ---------------------------------------------------------------
 
@@ -132,6 +133,17 @@ class State:
             (json.dumps(provider_state), time.time(), run_id),
         )
         self.conn.commit()
+
+    def finalize_run(self, run_id: str, generation_provider_states: dict[str, dict]) -> None:
+        """Mark a run and its generations submitted in one transaction."""
+        now = time.time()
+        with self.conn:
+            for generation_id, provider_state in generation_provider_states.items():
+                self.conn.execute(
+                    "UPDATE generations SET provider_state = ?, status = 'submitted', updated_at = ? WHERE id = ?",
+                    (json.dumps(provider_state), now, generation_id),
+                )
+            self.conn.execute("UPDATE runs SET status = 'submitted', updated_at = ? WHERE id = ?", (now, run_id))
 
     def set_run_status(self, run_id: str, status: str) -> None:
         self.conn.execute(

@@ -143,6 +143,12 @@ class Scope:
         self.scope_result = scope_result  # scopes.ScopeResult, only set for --campaign/--flow/--tag
 
 
+def _scope_error_count(scope: Scope) -> int:
+    if scope.scope_result is None:
+        return 0
+    return sum(1 for item in scope.scope_result.items if item.outcome == "error")
+
+
 def resolve_scope(
     ctx: Context,
     *,
@@ -362,10 +368,13 @@ def push(
         if item.outcome == "error":
             click.echo(redact(f"{item.translation_id}: error: {item.detail}"), err=True)
 
+    scope_errors = _scope_error_count(scope)
     if dry_run:
         for translation_id, strings in result.dry_run_files.items():
             click.echo(f"{translation_id}:")
             click.echo(json.dumps(strings, indent=2, sort_keys=True))
+        if result.errors or scope_errors:
+            raise SystemExit(1)
         return
 
     click.echo(
@@ -375,7 +384,7 @@ def push(
     if result.job_name:
         click.echo(f"Job: {result.job_name} (run {result.run_id})")
 
-    if result.errors:
+    if result.errors or scope_errors:
         raise SystemExit(1)
 
 
@@ -437,7 +446,7 @@ def pull(
             detail = ", ".join(f"{name}={count}" for name, count in counts.items())
             click.echo(f"  {translation_id}: {detail}")
 
-    if result.errors:
+    if result.errors or _scope_error_count(scope):
         raise SystemExit(1)
 
 
