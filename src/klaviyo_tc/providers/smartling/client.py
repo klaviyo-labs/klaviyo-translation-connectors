@@ -6,6 +6,7 @@ any other code is an error. Auth token is cached in memory and refreshed on a 40
 from __future__ import annotations
 
 import random
+import threading
 import time
 
 import httpx
@@ -73,6 +74,7 @@ class SmartlingClient:
         self._access_token: str | None = None
         self._refresh_token: str | None = None
         self._expires_at: float = 0.0
+        self._auth_lock = threading.Lock()
 
     def _send(self, method: str, url: str, **kwargs) -> httpx.Response:
         attempt = 0
@@ -110,17 +112,21 @@ class SmartlingClient:
         register_secret(self._access_token)
         register_secret(self._refresh_token)
 
-    def _ensure_token(self) -> None:
-        if not self._access_token or time.time() >= self._expires_at:
-            self._authenticate()
+    def _ensure_token(self, stale_token: str | None = None) -> str:
+        # Serialized so concurrent workers share one refresh instead of racing to authenticate.
+        with self._auth_lock:
+            expired = not self._access_token or time.time() >= self._expires_at
+            if expired or (stale_token is not None and self._access_token == stale_token):
+                self._authenticate()
+            return self._access_token
 
     def _authed(self, method: str, url: str, retried: bool = False, **kwargs) -> httpx.Response:
-        self._ensure_token()
+        token = self._ensure_token()
         headers = kwargs.pop("headers", None) or {}
-        headers["Authorization"] = f"Bearer {self._access_token}"
+        headers["Authorization"] = f"Bearer {token}"
         response = self._send(method, url, headers=headers, **kwargs)
         if response.status_code == 401 and not retried:
-            self._authenticate()
+            self._ensure_token(stale_token=token)
             return self._authed(method, url, retried=True, **kwargs)
         return response
 

@@ -5,6 +5,7 @@ klaviyo:
   revision: "2026-07-15.pre"
   source_locale: en
   fallback_locale: en
+  concurrency: 4              # parallel requests; whole-account sweeps load Klaviyo rendering
   # Flows/tags/templates use their own GA revision, not klaviyo.revision.
   revisions:
     campaigns: "2025-10-15"

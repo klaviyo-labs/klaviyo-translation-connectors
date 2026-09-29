@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from ..klaviyo import PATCH_CHUNK_SIZE
 from ..providers.base import FileSpec
 from . import placeholders
+from .concurrency import map_ordered
 from .config import Config
 from .state import State
 
@@ -262,12 +263,17 @@ def push_scope(
     result = BulkPushResult(scope_description=scope_description)
 
     per_translation: dict[str, tuple[dict[str, str], dict[str, str], list[str]]] = {}
-    for translation_id in translation_ids:
-        try:
-            per_translation[translation_id] = _compute_push_content(config=config, klaviyo=klaviyo, translation_id=translation_id)
-        except Exception as exc:  # noqa: BLE001 - report and continue with the rest of the scope
+    fetched = map_ordered(
+        lambda translation_id: _compute_push_content(config=config, klaviyo=klaviyo, translation_id=translation_id),
+        translation_ids,
+        config.klaviyo.concurrency,
+    )
+    for translation_id, content, exc in fetched:
+        if exc is not None:
             result.errors += 1
             result.items.append(BulkPushItem(translation_id, "error", detail=str(exc)))
+        else:
+            per_translation[translation_id] = content
 
     if dry_run:
         for translation_id, (strings, _included, skipped) in per_translation.items():
@@ -380,12 +386,18 @@ def pull_scope(
     *, config: Config, state: State, klaviyo, provider, translation_ids: list[str], force: bool, dry_run: bool
 ) -> BulkPullResult:
     result = BulkPullResult(scope_description=f"{len(translation_ids)} translation(s)")
-    for translation_id in translation_ids:
-        try:
-            result.per_translation[translation_id] = pull_translation(
-                config=config, state=state, klaviyo=klaviyo, provider=provider,
-                translation_id=translation_id, force=force, dry_run=dry_run,
-            )
-        except Exception as exc:  # noqa: BLE001 - report and continue with the rest of the scope
+    # Translations are independent; State serializes its own writes.
+    pulled = map_ordered(
+        lambda translation_id: pull_translation(
+            config=config, state=state, klaviyo=klaviyo, provider=provider,
+            translation_id=translation_id, force=force, dry_run=dry_run,
+        ),
+        translation_ids,
+        config.klaviyo.concurrency,
+    )
+    for translation_id, pull_result, exc in pulled:
+        if exc is not None:
             result.errors[translation_id] = str(exc)
+        else:
+            result.per_translation[translation_id] = pull_result
     return result

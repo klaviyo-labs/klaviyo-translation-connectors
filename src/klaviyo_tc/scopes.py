@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .core.concurrency import map_ordered
 from .klaviyo import KlaviyoAPIError, KlaviyoClient
 
 CAMPAIGN_VARIATION = "campaign-variation"
@@ -244,5 +245,15 @@ def resolve_scope(
         names.append("universal content")
 
     description = ", ".join(names) if names else "?"
-    items = [_resolve_translation(klaviyo, resource, create_missing=create_missing, dry_run=dry_run, config=config) for resource in resources]
+    resolved = map_ordered(
+        lambda resource: _resolve_translation(
+            klaviyo, resource, create_missing=create_missing, dry_run=dry_run, config=config
+        ),
+        resources,
+        config.klaviyo.concurrency,
+    )
+    items = [
+        item if exc is None else ScopeItem(resource, "error", detail=str(exc))
+        for resource, item, exc in resolved
+    ]
     return ScopeResult(description=description, items=items)

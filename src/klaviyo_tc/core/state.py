@@ -4,7 +4,9 @@ pushes within a run), written values, pull stats.
 from __future__ import annotations
 
 import json
+import functools
 import sqlite3
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -89,7 +91,9 @@ def _row_to_run(row: sqlite3.Row) -> dict[str, Any]:
 class State:
     def __init__(self, path: str):
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(path)
+        # One connection shared across pull worker threads; every public method holds this lock.
+        self._lock = threading.RLock()
+        self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.executescript(SCHEMA)
         self._migrate()
@@ -255,3 +259,17 @@ class State:
             (generation_id,),
         ).fetchall()
         return [dict(row) for row in rows]
+
+
+def _locked(method):
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapper
+
+
+for _name, _method in list(vars(State).items()):
+    if callable(_method) and not _name.startswith("_"):
+        setattr(State, _name, _locked(_method))

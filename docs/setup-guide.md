@@ -221,6 +221,14 @@ rather than each locale's default, set `providers.smartling.workflow_uid` in `co
 Find the workflow UID in Smartling under **Project Settings → Workflows**. It applies to every
 mapped locale, and is ignored when the job is created unauthorized.
 
+## Performance and load
+
+Each command fetches translations in parallel, `klaviyo.concurrency` at a time (default 4, maximum 32).
+Fetching a translation with its values makes Klaviyo render the message, which takes about 2 seconds
+for a large drag-and-drop email. On a whole-account sweep (`--all`, `--templates` with no filter),
+raising concurrency can push those renders past Klaviyo's time limit, and the tool reports them as errors.
+Prefer scoped runs (`--tag`, `--campaign`, `--templates --updated-since`) for routine syncs.
+
 ## Troubleshooting
 
 | Symptom | Likely cause |

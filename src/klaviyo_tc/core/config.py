@@ -16,6 +16,8 @@ DEFAULT_REVISION_OVERRIDES = {
     "campaigns": "2025-10-15", "flows": "2025-10-15", "tags": "2025-10-15", "templates": "2025-10-15", "universal_content": "2025-10-15"
 }
 DEFAULT_FILES_PER_BATCH = 100
+DEFAULT_CONCURRENCY = 4
+MAX_CONCURRENCY = 32
 DEFAULT_AUTHORIZE = True
 
 # YAML parses bare dates as `datetime.date`; normalize revisions back to `str`.
@@ -29,6 +31,7 @@ klaviyo:
   revision: "2026-07-15.pre"
   source_locale: en
   fallback_locale: en
+  concurrency: 4              # parallel requests; whole-account sweeps load Klaviyo rendering
   # Flows/tags/templates use their own GA revision, not klaviyo.revision.
   revisions:
     campaigns: "2025-10-15"
@@ -72,6 +75,7 @@ class KlaviyoConfig:
     source_locale: str = DEFAULT_LOCALE
     fallback_locale: str = DEFAULT_LOCALE
     revisions: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_REVISION_OVERRIDES))
+    concurrency: int = DEFAULT_CONCURRENCY
 
 
 @dataclass
@@ -130,6 +134,10 @@ def load_config(path: str = DEFAULT_CONFIG_PATH) -> Config:
     if provider_name == "smartling":
         _require(provider_config.get("project_id"), "providers.smartling.project_id")
 
+    concurrency = klaviyo_raw.get("concurrency", DEFAULT_CONCURRENCY)
+    if not isinstance(concurrency, int) or isinstance(concurrency, bool) or not 1 <= concurrency <= MAX_CONCURRENCY:
+        raise ConfigError(f"klaviyo.concurrency must be an integer from 1 to {MAX_CONCURRENCY}, got {concurrency!r}")
+
     revisions = dict(DEFAULT_REVISION_OVERRIDES)
     revisions.update({k: _as_str(v) for k, v in (klaviyo_raw.get("revisions") or {}).items()})
 
@@ -140,6 +148,7 @@ def load_config(path: str = DEFAULT_CONFIG_PATH) -> Config:
             source_locale=klaviyo_raw.get("source_locale", DEFAULT_LOCALE),
             fallback_locale=klaviyo_raw.get("fallback_locale", DEFAULT_LOCALE),
             revisions=revisions,
+            concurrency=concurrency,
         ),
         provider_name=provider_name,
         provider_config=provider_config,
