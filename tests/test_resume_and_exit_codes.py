@@ -45,7 +45,9 @@ def test_state_opens_a_database_created_before_runs_existed(tmp_path):
 
     state = State(str(path))
     generation_id = state.create_generation(TRANSLATION_ID, FILE_NAME, {"k": "v"}, {"fr": "fr-FR"}, run_id="run-1")
-    assert state.get_generation(generation_id)["run_id"] == "run-1"
+    generation = state.get_generation(generation_id)
+    assert generation["run_id"] == "run-1"
+    assert generation["baseline"] == {}
 
 
 def _translation(source_value):

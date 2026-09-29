@@ -118,7 +118,7 @@ a campaign message's id is its translation's `campaign-variation` id.
 |-------------------------|-------------------------------------------------------------------|
 | `written`               | Patched into Klaviyo.                                             |
 | `unchanged`              | Already matches the current Klaviyo translation.                  |
-| `conflict`               | Someone edited this translation in Klaviyo since the last pull; rerun with `--force` to overwrite. |
+| `conflict`               | Someone edited this translation in Klaviyo after it was pushed (or since the tool last wrote it); rerun with `--force` to overwrite. |
 | `stale_source`           | The Klaviyo source string changed after this was pushed; re-push. |
 | `placeholder_mismatch`   | `{{...}}`/`{%...%}` placeholders don't match the source; needs a linguist fix. |
 | `deleted`                | The value no longer exists in Klaviyo.                             |

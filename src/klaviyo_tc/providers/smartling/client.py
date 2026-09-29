@@ -5,6 +5,7 @@ any other code is an error. Auth token is cached in memory and refreshed on a 40
 """
 from __future__ import annotations
 
+import json
 import random
 import threading
 import time
@@ -31,6 +32,16 @@ def _has_errors(value) -> bool:
     if isinstance(value, str):
         return value.strip() not in ("", "{}", "[]", "null")
     return bool(value)
+
+
+def _only_no_content(general_errors) -> bool:
+    # Every string was already translated, so the job had nothing to add; the files still uploaded.
+    try:
+        parsed = json.loads(general_errors) if isinstance(general_errors, str) else general_errors
+        messages = [e.get("message") for e in parsed.get("errors", [])]
+    except (AttributeError, TypeError, ValueError):
+        return False
+    return bool(messages) and all(m == "Job has no content" for m in messages)
 
 
 def _file_failed(file_info: dict) -> bool:
@@ -197,7 +208,7 @@ class SmartlingClient:
             if status == "COMPLETED":
                 general_errors = data.get("generalErrors")
                 failed_files = [f for f in data.get("files", []) if _file_failed(f)]
-                if _has_errors(general_errors) or failed_files:
+                if (_has_errors(general_errors) and not _only_no_content(general_errors)) or failed_files:
                     raise SmartlingError(
                         None, f"batch {batch_uid} completed with errors: general={general_errors} files={failed_files}"
                     )

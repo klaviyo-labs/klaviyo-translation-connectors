@@ -57,8 +57,16 @@ def _file_name_for(translation_id: str) -> str:
     return f"klaviyo/{translation_id.replace('::', '__')}.json"
 
 
-def _compute_push_content(*, config: Config, klaviyo, translation_id: str) -> tuple[dict[str, str], dict[str, str], list[str]]:
-    """Return (strings, included_locales, skipped_locales) for one translation."""
+@dataclass
+class PushContent:
+    strings: dict[str, str]
+    included: dict[str, str]
+    skipped_locales: list[str]
+    # {value_id: {klaviyo_locale: value}} already in Klaviyo at push time, e.g. Klaviyo's own pre-fill.
+    baseline: dict[str, dict[str, str]]
+
+
+def _compute_push_content(*, config: Config, klaviyo, translation_id: str) -> PushContent:
     data = klaviyo.get_translation(translation_id)
     attrs = data["attributes"]
     target_locales = attrs.get("target_locales", [])
@@ -67,11 +75,17 @@ def _compute_push_content(*, config: Config, klaviyo, translation_id: str) -> tu
     included = {k: v for k, v in config.locales.items() if k in target_locales}
     skipped_locales = [k for k in config.locales if k not in included]
     strings = {v["id"]: v["source_value"] for v in values if v.get("source_value")}
-    return strings, included, skipped_locales
+    baseline = {
+        v["id"]: {loc: (v.get("translations") or {}).get(loc) or "" for loc in included}
+        for v in values
+        if v["id"] in strings
+    }
+    return PushContent(strings, included, skipped_locales, baseline)
 
 
 def push_translation(*, config: Config, state: State, klaviyo, provider, translation_id: str, dry_run: bool) -> PushResult:
-    strings, included, skipped_locales = _compute_push_content(config=config, klaviyo=klaviyo, translation_id=translation_id)
+    content = _compute_push_content(config=config, klaviyo=klaviyo, translation_id=translation_id)
+    strings, included, skipped_locales = content.strings, content.included, content.skipped_locales
     file_name = _file_name_for(translation_id)
 
     result = PushResult(
@@ -86,11 +100,11 @@ def push_translation(*, config: Config, state: State, klaviyo, provider, transla
 
     generation = state.get_pending_generation(translation_id)
     if generation is None:
-        generation_id = state.create_generation(translation_id, file_name, strings, included)
+        generation_id = state.create_generation(translation_id, file_name, strings, included, baseline=content.baseline)
         generation = state.get_generation(generation_id)
     elif generation["sent_snapshot"] != strings or generation["locales"] != included:
         # Resuming: keep the snapshot in sync with what we're about to (re)upload.
-        state.update_generation_snapshot(generation["id"], strings, included)
+        state.update_generation_snapshot(generation["id"], strings, included, content.baseline)
         generation["sent_snapshot"] = strings
         generation["locales"] = included
 
@@ -118,7 +132,7 @@ def push_translation(*, config: Config, state: State, klaviyo, provider, transla
 
 def _classify(
     *, value_id: str, translated: str, sent_snapshot: dict, current_values: dict, klaviyo_locale: str,
-    state: State, translation_id: str, force: bool,
+    state: State, translation_id: str, force: bool, generation: dict,
 ) -> str:
     if value_id not in sent_snapshot:
         return "unknown_key"
@@ -134,11 +148,14 @@ def _classify(
     if existing == translated:
         return "unchanged"
 
-    # A `written` record but a different (possibly cleared/empty) current
-    # value means someone touched it in Klaviyo since our last write.
-    last_written = state.get_written(translation_id, value_id, klaviyo_locale)
-    normalized_last_written = last_written if last_written is not None else ""
-    if existing != normalized_last_written and not force:
+    # Expected value: our write since this push, else what Klaviyo held at push time (e.g. its pre-fill).
+    record = state.get_written_record(translation_id, value_id, klaviyo_locale)
+    at_push = generation["baseline"].get(value_id, {}).get(klaviyo_locale)
+    if record is not None and (at_push is None or record["generation_id"] == generation["id"]):
+        expected = record["value"]
+    else:
+        expected = at_push or ""  # generations from before baselines existed have none
+    if existing != expected and not force:
         return "conflict"
     return "written"
 
@@ -176,6 +193,7 @@ def pull_translation(
                 state=state,
                 translation_id=translation_id,
                 force=force,
+                generation=generation,
             )
             counts[outcome] += 1
             if outcome == "written":
@@ -198,6 +216,7 @@ def pull_translation(
                     state=state,
                     translation_id=translation_id,
                     force=force,
+                    generation=generation,
                 )
                 if fresh_outcome == "written":
                     still_eligible.append(entry)
@@ -262,7 +281,7 @@ def push_scope(
 ) -> BulkPushResult:
     result = BulkPushResult(scope_description=scope_description)
 
-    per_translation: dict[str, tuple[dict[str, str], dict[str, str], list[str]]] = {}
+    per_translation: dict[str, PushContent] = {}
     fetched = map_ordered(
         lambda translation_id: _compute_push_content(config=config, klaviyo=klaviyo, translation_id=translation_id),
         translation_ids,
@@ -276,14 +295,15 @@ def push_scope(
             per_translation[translation_id] = content
 
     if dry_run:
-        for translation_id, (strings, _included, skipped) in per_translation.items():
-            result.dry_run_files[translation_id] = strings
-            result.skipped_locales += len(skipped)
-            result.items.append(BulkPushItem(translation_id, "dry-run", skipped_locales=skipped))
+        for translation_id, content in per_translation.items():
+            result.dry_run_files[translation_id] = content.strings
+            result.skipped_locales += len(content.skipped_locales)
+            result.items.append(BulkPushItem(translation_id, "dry-run", skipped_locales=content.skipped_locales))
         return result
 
     to_submit = []
-    for translation_id, (strings, included, skipped) in per_translation.items():
+    for translation_id, content in per_translation.items():
+        strings, included, skipped = content.strings, content.included, content.skipped_locales
         result.skipped_locales += len(skipped)
         active = state.get_active_generation(translation_id)
         unchanged = active is not None and active["sent_snapshot"] == strings and active["locales"] == included
@@ -317,10 +337,13 @@ def push_scope(
         file_name = _file_name_for(translation_id)
         generation = existing_generations.get(translation_id)
         if generation is None:
-            generation_id = state.create_generation(translation_id, file_name, strings, included, run_id=run_id)
+            generation_id = state.create_generation(
+                translation_id, file_name, strings, included, run_id=run_id,
+                baseline=per_translation[translation_id].baseline,
+            )
             generation = state.get_generation(generation_id)
         elif generation["sent_snapshot"] != strings or generation["locales"] != included:
-            state.update_generation_snapshot(generation["id"], strings, included)
+            state.update_generation_snapshot(generation["id"], strings, included, per_translation[translation_id].baseline)
             generation["sent_snapshot"] = strings
             generation["locales"] = included
         generations[translation_id] = generation

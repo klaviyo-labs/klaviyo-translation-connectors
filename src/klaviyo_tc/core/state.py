@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS generations (
     status TEXT NOT NULL,
     provider_state TEXT,
     run_id TEXT,
+    baseline TEXT,
     created_at REAL NOT NULL,
     updated_at REAL NOT NULL
 );
@@ -70,6 +71,7 @@ def _row_to_generation(row: sqlite3.Row) -> dict[str, Any]:
         "status": row["status"],
         "provider_state": json.loads(row["provider_state"]) if row["provider_state"] else None,
         "run_id": row["run_id"],
+        "baseline": json.loads(row["baseline"]) if row["baseline"] else {},
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
     }
@@ -100,11 +102,12 @@ class State:
         self.conn.commit()
 
     def _migrate(self) -> None:
-        # A generations table created before `runs` existed lacks this column.
-        try:
-            self.conn.execute("ALTER TABLE generations ADD COLUMN run_id TEXT")
-        except sqlite3.OperationalError:
-            pass
+        # Older generations tables lack these columns.
+        for column in ("run_id", "baseline"):
+            try:
+                self.conn.execute(f"ALTER TABLE generations ADD COLUMN {column} TEXT")
+            except sqlite3.OperationalError:
+                pass
         # Created here, not in SCHEMA, so it runs after the column exists on upgraded databases.
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_generations_run ON generations(run_id)")
 
@@ -164,15 +167,24 @@ class State:
     # -- Generations ----------------------------------------------------------
 
     def create_generation(
-        self, translation_id: str, file_name: str, sent_snapshot: dict, locales: dict, run_id: str | None = None
+        self,
+        translation_id: str,
+        file_name: str,
+        sent_snapshot: dict,
+        locales: dict,
+        run_id: str | None = None,
+        baseline: dict | None = None,
     ) -> str:
         gen_id = str(uuid.uuid4())
         now = time.time()
         self.conn.execute(
             "INSERT INTO generations "
-            "(id, translation_id, file_name, sent_snapshot, locales, status, run_id, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)",
-            (gen_id, translation_id, file_name, json.dumps(sent_snapshot), json.dumps(locales), run_id, now, now),
+            "(id, translation_id, file_name, sent_snapshot, locales, status, run_id, baseline, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)",
+            (
+                gen_id, translation_id, file_name, json.dumps(sent_snapshot), json.dumps(locales), run_id,
+                json.dumps(baseline or {}), now, now,
+            ),
         )
         self.conn.commit()
         return gen_id
@@ -197,10 +209,12 @@ class State:
         ).fetchone()
         return _row_to_generation(row) if row else None
 
-    def update_generation_snapshot(self, generation_id: str, sent_snapshot: dict, locales: dict) -> None:
+    def update_generation_snapshot(
+        self, generation_id: str, sent_snapshot: dict, locales: dict, baseline: dict | None = None
+    ) -> None:
         self.conn.execute(
-            "UPDATE generations SET sent_snapshot = ?, locales = ?, updated_at = ? WHERE id = ?",
-            (json.dumps(sent_snapshot), json.dumps(locales), time.time(), generation_id),
+            "UPDATE generations SET sent_snapshot = ?, locales = ?, baseline = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(sent_snapshot), json.dumps(locales), json.dumps(baseline or {}), time.time(), generation_id),
         )
         self.conn.commit()
 
@@ -237,11 +251,15 @@ class State:
         self.conn.commit()
 
     def get_written(self, translation_id: str, value_id: str, locale: str) -> str | None:
+        record = self.get_written_record(translation_id, value_id, locale)
+        return record["value"] if record else None
+
+    def get_written_record(self, translation_id: str, value_id: str, locale: str) -> dict | None:
         row = self.conn.execute(
-            "SELECT value FROM written WHERE translation_id = ? AND value_id = ? AND locale = ?",
+            "SELECT value, generation_id FROM written WHERE translation_id = ? AND value_id = ? AND locale = ?",
             (translation_id, value_id, locale),
         ).fetchone()
-        return row["value"] if row else None
+        return {"value": row["value"], "generation_id": row["generation_id"]} if row else None
 
     def record_pull_status(self, generation_id: str, locale: str, downloaded: int, written: int) -> None:
         self.conn.execute(

@@ -157,7 +157,11 @@ class SmartlingProvider:
                 checkpoint(dict(state))
 
         for batch in batches:
+            if batch.get("completed"):
+                continue
             self._client.poll_batch(batch["batch_uid"])
+            batch["completed"] = True
+            checkpoint(dict(state))
 
         file_states = {f.file_name: self._file_state(f.file_name) for f in files}
         return SubmitResult(state=state, submitted=True, file_states=file_states)

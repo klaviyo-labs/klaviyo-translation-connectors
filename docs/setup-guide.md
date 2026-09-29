@@ -147,7 +147,7 @@ Once your linguists have published translations in Smartling:
 
 - `written`: sent to Klaviyo.
 - `unchanged`: Klaviyo already has this translation.
-- `conflict`: someone edited the value in Klaviyo since the tool last wrote it. The Klaviyo version is kept. Rerun with `--force` to overwrite it.
+- `conflict`: someone edited the value in Klaviyo after the push, or since the tool last wrote it. The Klaviyo version is kept. Rerun with `--force` to overwrite it. Values that were already there at push time, such as the French Klaviyo pre-fills into a new translation from matching strings elsewhere in the account, are replaced without a conflict.
 - `stale_source`: the Klaviyo source text changed after the push. Push again.
 - `placeholder_mismatch`: the translation adds, drops or reorders template tags. Fix it in Smartling.
 - `deleted` or `unknown_key`: the content no longer exists in Klaviyo, or wasn't part of the push.
