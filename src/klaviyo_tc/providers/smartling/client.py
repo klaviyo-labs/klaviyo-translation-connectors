@@ -1,7 +1,7 @@
 """Smartling REST API client: auth, jobs, batches, file upload/status/download.
 
-Envelope contract: `{"response": {"code": "SUCCESS", "data": {...}}}`; any other
-code is an error. Auth token is cached in memory and refreshed on a 401.
+Envelope contract: `{"response": {"code": "SUCCESS"|"ACCEPTED", "data": {...}}}`;
+any other code is an error. Auth token is cached in memory and refreshed on a 401.
 """
 from __future__ import annotations
 
@@ -10,8 +10,12 @@ import time
 
 import httpx
 
+from ...redact import register_secret
+
 MAX_ATTEMPTS = 6
+SUCCESS_CODES = {"SUCCESS", "ACCEPTED"}
 FAILURE_BATCH_STATUSES = {"FAILED", "CANCELLED"}
+FAILURE_FILE_STATUSES = {"FAILED", "ERROR"}
 
 
 class SmartlingError(Exception):
@@ -19,6 +23,12 @@ class SmartlingError(Exception):
         super().__init__(f"Smartling API error {status_code}: {detail}")
         self.status_code = status_code
         self.detail = detail
+
+
+def _file_failed(file_info: dict) -> bool:
+    if file_info.get("status") in FAILURE_FILE_STATUSES:
+        return True
+    return bool(file_info.get("errors"))
 
 
 def _retry_delay(response: httpx.Response, attempt: int) -> float:
@@ -75,7 +85,7 @@ class SmartlingClient:
         except ValueError:
             raise SmartlingError(response.status_code, response.text) from None
         info = payload.get("response", {})
-        if info.get("code") != "SUCCESS":
+        if info.get("code") not in SUCCESS_CODES:
             raise SmartlingError(response.status_code, info.get("errors") or payload)
         return info.get("data") or {}
 
@@ -89,6 +99,9 @@ class SmartlingClient:
         self._access_token = data["accessToken"]
         self._refresh_token = data["refreshToken"]
         self._expires_at = time.time() + data["expiresIn"] - 30  # renew a little early
+        # Issued tokens aren't known secrets ahead of time; register them so they're redacted too.
+        register_secret(self._access_token)
+        register_secret(self._refresh_token)
 
     def _ensure_token(self) -> None:
         if not self._access_token or time.time() >= self._expires_at:
@@ -119,6 +132,16 @@ class SmartlingClient:
         )
         return data["translationJobUid"]
 
+    def find_job_by_name(self, job_name: str) -> str | None:
+        """Adopt an existing job of this name (job names are project-unique)."""
+        data = self._call(
+            "GET", f"/jobs-api/v3/projects/{self.project_id}/jobs", params={"jobName": job_name}
+        )
+        for item in data.get("items", []):
+            if item.get("jobName") == job_name:
+                return item.get("translationJobUid")
+        return None
+
     def create_batch(self, translation_job_uid: str, file_uri: str) -> str:
         data = self._call(
             "POST",
@@ -138,15 +161,21 @@ class SmartlingClient:
             data=data,
         )
 
-    def get_batch_status(self, batch_uid: str) -> str:
-        data = self._call("GET", f"/job-batches-api/v2/projects/{self.project_id}/batches/{batch_uid}")
-        return data["status"]
+    def get_batch_status(self, batch_uid: str) -> dict:
+        return self._call("GET", f"/job-batches-api/v2/projects/{self.project_id}/batches/{batch_uid}")
 
     def poll_batch(self, batch_uid: str) -> None:
         deadline = time.time() + self.poll_timeout
         while True:
-            status = self.get_batch_status(batch_uid)
+            data = self.get_batch_status(batch_uid)
+            status = data.get("status")
             if status == "COMPLETED":
+                general_errors = data.get("generalErrors") or []
+                failed_files = [f for f in data.get("files", []) if _file_failed(f)]
+                if general_errors or failed_files:
+                    raise SmartlingError(
+                        None, f"batch {batch_uid} completed with errors: general={general_errors} files={failed_files}"
+                    )
                 return
             if status in FAILURE_BATCH_STATUSES:
                 raise SmartlingError(None, f"batch {batch_uid} failed with status {status}")

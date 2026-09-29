@@ -3,7 +3,14 @@ import respx
 
 from klaviyo_tc.cli import cli
 
-from conftest import KLAVIYO_BASE, mock_klaviyo_get_translation, mock_smartling_auth, PROJECT_ID, SMARTLING_BASE
+from conftest import (
+    KLAVIYO_BASE,
+    PROJECT_ID,
+    SMARTLING_BASE,
+    mock_klaviyo_get_translation,
+    mock_smartling_auth,
+    mock_smartling_no_job_found,
+)
 
 TRANSLATION_ID_1 = "campaign-variation::email::one"
 TRANSLATION_ID_2 = "campaign-variation::email::two"
@@ -64,6 +71,7 @@ def test_push_all_uses_channel_filter_and_lists_cursor_pages(project, runner):
     mock_klaviyo_get_translation(respx, TRANSLATION_ID_1, target_locales=["fr"], values=values_1)
     mock_klaviyo_get_translation(respx, TRANSLATION_ID_2, target_locales=["fr"], values=values_2)
     mock_smartling_auth(respx)
+    mock_smartling_no_job_found(respx)
     respx.post(f"{SMARTLING_BASE}/jobs-api/v3/projects/{PROJECT_ID}/jobs").respond(
         json={"response": {"code": "SUCCESS", "data": {"translationJobUid": "job-1"}}}
     )

@@ -23,7 +23,7 @@ class FakeProvider:
     def __init__(self):
         self.storage: dict[str, dict[str, str]] = {}  # file_name -> {locale: {value_id: value}}
 
-    def submit(self, *, translation_id, file_name, strings, target_locales, reference, state=None):
+    def submit(self, *, translation_id, file_name, strings, target_locales, reference, state=None, checkpoint=None):
         state = dict(state or {})
         state["file_name"] = file_name
         state.setdefault("locales", [])
@@ -47,7 +47,6 @@ def _config(tmp_path):
         klaviyo=KlaviyoConfig(
             base_url=KLAVIYO_BASE,
             revision="2026-07-15.pre",
-            placeholder_pattern=r"\{\{[^}]+\}\}|\{%[^%]+%\}",
         ),
         provider_name="fake",
         provider_config={},

@@ -3,7 +3,13 @@ import respx
 
 from klaviyo_tc.cli import cli
 
-from conftest import PROJECT_ID, SMARTLING_BASE, mock_klaviyo_get_translation, mock_smartling_auth
+from conftest import (
+    PROJECT_ID,
+    SMARTLING_BASE,
+    mock_klaviyo_get_translation,
+    mock_smartling_auth,
+    mock_smartling_no_job_found,
+)
 
 TRANSLATION_ID = "campaign-variation::email::01K1EXAMPLE"
 VALUES = [{"id": f"{TRANSLATION_ID}::subject", "source_value": "Hello", "translations": {}}]
@@ -13,6 +19,7 @@ VALUES = [{"id": f"{TRANSLATION_ID}::subject", "source_value": "Hello", "transla
 def test_expired_token_triggers_one_reauth_and_retry(project, runner):
     mock_klaviyo_get_translation(respx, TRANSLATION_ID, target_locales=["fr"], values=VALUES)
     auth_route = mock_smartling_auth(respx)
+    mock_smartling_no_job_found(respx)
 
     job_url = f"{SMARTLING_BASE}/jobs-api/v3/projects/{PROJECT_ID}/jobs"
     # First call with the (stale) token is rejected; after re-auth, the retry succeeds.

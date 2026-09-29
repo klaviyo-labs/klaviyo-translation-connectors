@@ -99,6 +99,13 @@ class State:
         ).fetchone()
         return _row_to_generation(row) if row else None
 
+    def update_generation_snapshot(self, generation_id: str, sent_snapshot: dict, locales: dict) -> None:
+        self.conn.execute(
+            "UPDATE generations SET sent_snapshot = ?, locales = ?, updated_at = ? WHERE id = ?",
+            (json.dumps(sent_snapshot), json.dumps(locales), time.time(), generation_id),
+        )
+        self.conn.commit()
+
     def set_provider_state(self, generation_id: str, provider_state: dict) -> None:
         self.conn.execute(
             "UPDATE generations SET provider_state = ?, updated_at = ? WHERE id = ?",

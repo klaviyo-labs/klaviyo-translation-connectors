@@ -8,7 +8,7 @@ class Provider(Protocol):
     name: str
 
     def submit(self, *, translation_id, file_name, strings, target_locales,
-               reference, state=None) -> SubmitResult: ...
+               reference, state=None, checkpoint=None) -> SubmitResult: ...
     def completed_locales(self, state: dict) -> list[str]: ...
     def fetch(self, state: dict, locale: str) -> dict[str, str]: ...
 ```
@@ -16,13 +16,19 @@ class Provider(Protocol):
 - `submit` sends (or resumes sending) `strings` (a flat `value_id -> source_value`
   dict) for translation into `target_locales` (provider-side locale codes).
   `reference` is a stable id (the sync engine's generation id) safe to use for
-  idempotency. `state` is whatever your own `submit` returned last time this
-  translation was pushed and didn't finish (e.g. after a crash); return `None`
-  from your own state on first use. The engine persists `SubmitResult.state` as
-  opaque JSON on its own state row and passes it back on the next `submit`
-  call, so encode enough there (job ids, upload status, etc.) to resume
-  correctly. Set `SubmitResult.submitted = False` if more `submit` calls are
-  still needed before the engine should consider the push complete.
+  idempotency (e.g. fold it into a remote job name, since names are often
+  unique per project). `state` is whatever your own `submit` returned last
+  time this translation was pushed and didn't finish (e.g. after a crash);
+  return `None` from your own state on first use. The engine persists
+  `SubmitResult.state` as opaque JSON on its own state row and passes it back
+  on the next `submit` call, so encode enough there (job ids, upload status,
+  etc.) to resume correctly. Call `checkpoint(state)` after each remote step
+  that changes `state` (e.g. right after a job or batch is created) so the
+  engine persists that progress immediately, before the next step runs --
+  otherwise a crash between two steps re-does work that already succeeded
+  remotely. `checkpoint` may be `None` in tests; guard for that. Set
+  `SubmitResult.submitted = False` if more `submit` calls are still needed
+  before the engine should consider the push complete.
 - `completed_locales` reports which of the submitted locales have translations
   ready to download, given the same `state` dict.
 - `fetch` returns the translated strings for one locale. Keys absent or empty

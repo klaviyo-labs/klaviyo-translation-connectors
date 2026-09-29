@@ -5,7 +5,9 @@ See docs/adding-a-provider.md for a walkthrough.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Callable, Protocol, runtime_checkable
+
+Checkpoint = Callable[[dict], None]
 
 
 @dataclass
@@ -29,8 +31,12 @@ class Provider(Protocol):
         target_locales: list[str],
         reference: str,
         state: dict | None = None,
+        checkpoint: Checkpoint | None = None,
     ) -> SubmitResult:
-        """Submit (or resume, given a prior partial `state`) strings for translation."""
+        """Submit (or resume, given a prior partial `state`) strings for translation.
+
+        Call `checkpoint(state)` after each remote step to persist progress immediately.
+        """
         ...
 
     def completed_locales(self, state: dict) -> list[str]:

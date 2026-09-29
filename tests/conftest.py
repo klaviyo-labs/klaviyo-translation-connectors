@@ -11,7 +11,6 @@ PROJECT_ID = "proj123"
 CONFIG_TOML = r"""[klaviyo]
 base_url = "https://a.klaviyo.com"
 revision = "2026-07-15.pre"
-placeholder_pattern = '\{\{[^}]+\}\}|\{%[^%]+%\}'
 
 [provider]
 name = "smartling"
@@ -20,7 +19,7 @@ name = "smartling"
 base_url = "https://api.smartling.com"
 project_id = "proj123"
 string_format_paths = "html: *"
-placeholder_format_custom = '\{\{[^}]+\}\}|\{%[^%]+%\}'
+placeholder_format_custom = ['\{\{[^}]+\}\}', '\{%[^%]+%\}']
 
 [locales]
 fr = "fr-FR"
@@ -29,6 +28,8 @@ es = "es-ES"
 [state]
 path = ".klaviyo-tc/state.db"
 """
+
+PLACEHOLDER_FORMAT_CUSTOM = [r"\{\{[^}]+\}\}", r"\{%[^%]+%\}"]
 
 SENTINEL_KLAVIYO_KEY = "sentinel-klaviyo-key-do-not-leak"
 SENTINEL_SMARTLING_USER = "sentinel-smartling-user-do-not-leak"
@@ -49,6 +50,13 @@ def project(tmp_path, monkeypatch):
 @pytest.fixture
 def runner():
     return CliRunner()
+
+
+def mock_smartling_no_job_found(respx_mock):
+    """No existing job matches by name: submit() falls through to create_job."""
+    return respx_mock.get(f"{SMARTLING_BASE}/jobs-api/v3/projects/{PROJECT_ID}/jobs").respond(
+        json={"response": {"code": "SUCCESS", "data": {"items": []}}}
+    )
 
 
 def mock_smartling_auth(respx_mock):

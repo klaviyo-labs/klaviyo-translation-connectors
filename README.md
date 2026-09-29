@@ -91,6 +91,9 @@ calling the provider or writing state.
   to pick up the new source text.
 - Some TMS UIs only surface fully published locales; this tool reads
   per-locale completion directly so it can pick up partial progress.
+- The Klaviyo API has no conditional write: `pull` re-fetches and re-checks a
+  value immediately before PATCHing it, which narrows but cannot close the
+  window for a concurrent edit in Klaviyo between that check and the write.
 
 ## Development
 

@@ -12,9 +12,6 @@ DEFAULT_STATE_PATH = ".klaviyo-tc/state.db"
 TEMPLATE = r"""[klaviyo]
 base_url = "https://a.klaviyo.com"
 revision = "2026-07-15.pre"
-# Klaviyo's own placeholder syntax ({{var}}, {% tag %}); used to detect
-# translations that dropped or reordered placeholders, regardless of provider.
-placeholder_pattern = '\{\{[^}]+\}\}|\{%[^%]+%\}'
 
 [provider]
 name = "smartling"
@@ -23,7 +20,8 @@ name = "smartling"
 base_url = "https://api.smartling.com"
 project_id = ""
 string_format_paths = "html: *"
-placeholder_format_custom = '\{\{[^}]+\}\}|\{%[^%]+%\}'
+# Told to Smartling verbatim, one regex per placeholder syntax; not used by our own parser.
+placeholder_format_custom = ['\{\{[^}]+\}\}', '\{%[^%]+%\}']
 
 [locales]
 fr = "fr-FR"
@@ -41,7 +39,6 @@ class ConfigError(Exception):
 class KlaviyoConfig:
     base_url: str
     revision: str
-    placeholder_pattern: str
 
 
 @dataclass
@@ -71,7 +68,6 @@ def load_config(path: str = DEFAULT_CONFIG_PATH) -> Config:
         klaviyo=KlaviyoConfig(
             base_url=klaviyo_raw["base_url"],
             revision=klaviyo_raw["revision"],
-            placeholder_pattern=klaviyo_raw["placeholder_pattern"],
         ),
         provider_name=provider_name,
         provider_config=provider_config,

@@ -1,11 +1,12 @@
 import json
 
+import httpx
 import respx
 
 from klaviyo_tc.cli import cli
 from klaviyo_tc.core.state import State
 
-from conftest import KLAVIYO_BASE, PROJECT_ID, SMARTLING_BASE, mock_smartling_auth
+from conftest import KLAVIYO_BASE, PROJECT_ID, SMARTLING_BASE, klaviyo_translation_payload, mock_smartling_auth
 
 TRANSLATION_ID = "campaign-variation::email::01K1EXAMPLE"
 FILE_NAME = f"klaviyo/{TRANSLATION_ID.replace('::', '__')}.json"
@@ -238,6 +239,123 @@ def test_pull_unknown_key_not_in_sent_snapshot(project, runner):
     result = runner.invoke(cli, ["pull"])
     assert result.exit_code == 0, result.output
     assert "unknown_key=1" in result.output
+
+
+@respx.mock
+def test_pull_conflict_when_written_value_was_since_cleared_in_klaviyo(project, runner):
+    # A `written` record exists but Klaviyo's value differs (cleared to empty) -> conflict.
+    state, generation_id = _seed_submitted_generation({SUBJECT_KEY: "Hello"})
+    state.record_written(TRANSLATION_ID, SUBJECT_KEY, "fr", "Bonjour", generation_id)
+    mock_smartling_auth(respx)
+    _mock_file_status({"fr-FR": 1})
+    _mock_download("fr-FR", {"smartling": {}, SUBJECT_KEY: "Bonjour (v2)"})
+    # Someone cleared the fr translation in Klaviyo after we wrote "Bonjour".
+    _mock_klaviyo_current_values([{"id": SUBJECT_KEY, "source_value": "Hello", "translations": {"fr": ""}}])
+
+    result = runner.invoke(cli, ["pull"])
+    assert result.exit_code == 0, result.output
+    assert "conflict=1" in result.output
+    assert state.get_written(TRANSLATION_ID, SUBJECT_KEY, "fr") == "Bonjour"
+
+
+@respx.mock
+def test_pull_identical_value_is_unchanged_even_with_a_written_record(project, runner):
+    # Same setup, but the download equals what Klaviyo has -> unchanged, never conflict.
+    state, generation_id = _seed_submitted_generation({SUBJECT_KEY: "Hello"})
+    state.record_written(TRANSLATION_ID, SUBJECT_KEY, "fr", "Bonjour", generation_id)
+    mock_smartling_auth(respx)
+    _mock_file_status({"fr-FR": 1})
+    _mock_download("fr-FR", {"smartling": {}, SUBJECT_KEY: "Bonjour"})
+    _mock_klaviyo_current_values([{"id": SUBJECT_KEY, "source_value": "Hello", "translations": {"fr": "Bonjour"}}])
+
+    result = runner.invoke(cli, ["pull"])
+    assert result.exit_code == 0, result.output
+    assert "unchanged=1" in result.output
+    assert "conflict" not in result.output
+
+
+@respx.mock
+def test_pull_rechecks_before_patch_and_skips_a_concurrent_klaviyo_edit(project, runner):
+    # Someone edits Klaviyo directly between our first classify and the PATCH.
+    _seed_submitted_generation({SUBJECT_KEY: "Hello"})
+    mock_smartling_auth(respx)
+    _mock_file_status({"fr-FR": 1})
+    _mock_download("fr-FR", {"smartling": {}, SUBJECT_KEY: "Bonjour"})
+
+    first_fetch = klaviyo_translation_payload(
+        TRANSLATION_ID, target_locales=["fr"], values=[{"id": SUBJECT_KEY, "source_value": "Hello", "translations": {}}]
+    )
+    concurrently_edited = klaviyo_translation_payload(
+        TRANSLATION_ID,
+        target_locales=["fr"],
+        values=[{"id": SUBJECT_KEY, "source_value": "Hello", "translations": {"fr": "Bonjour (edited by a human)"}}],
+    )
+    get_route = respx.get(f"{KLAVIYO_BASE}/api/translations/{TRANSLATION_ID}/").mock(
+        side_effect=[
+            httpx.Response(200, json=first_fetch),  # initial classify: looks writable
+            httpx.Response(200, json=concurrently_edited),  # re-fetch right before PATCH
+        ]
+    )
+    # No PATCH route registered: a PATCH here would fail respx matching.
+
+    result = runner.invoke(cli, ["pull"])
+    assert result.exit_code == 0, result.output
+    assert "conflict=1" in result.output
+    assert "written=1" not in result.output
+    assert get_route.calls.call_count == 2
+
+    state = State(".klaviyo-tc/state.db")
+    assert state.get_written(TRANSLATION_ID, SUBJECT_KEY, "fr") is None
+
+
+@respx.mock
+def test_pull_records_written_per_chunk_so_a_later_chunk_failure_keeps_earlier_writes(project, runner):
+    # 101 values (chunks of 100 + 1); chunk 2's PATCH fails but chunk 1 must stick.
+    keys = [f"{TRANSLATION_ID}::v{i}" for i in range(101)]
+    sent_snapshot = {k: f"source {i}" for i, k in enumerate(keys)}
+    downloaded = {k: f"translated {i}" for i, k in enumerate(keys)}
+    empty_values = [{"id": k, "source_value": f"source {i}", "translations": {}} for i, k in enumerate(keys)]
+
+    _seed_submitted_generation(sent_snapshot)
+    mock_smartling_auth(respx)
+    _mock_file_status({"fr-FR": 101})
+    _mock_download("fr-FR", {"smartling": {}, **downloaded})
+    get_route = _mock_klaviyo_current_values(empty_values)
+    patch_route = respx.patch(f"{KLAVIYO_BASE}/api/translations/{TRANSLATION_ID}/").mock(
+        side_effect=[
+            httpx.Response(200, json={"data": {"type": "translation", "id": TRANSLATION_ID, "attributes": {}}}),
+            httpx.Response(400, json={"errors": [{"detail": "boom"}]}),
+        ]
+    )
+
+    first = runner.invoke(cli, ["pull"])
+    assert first.exit_code != 0
+    assert patch_route.calls.call_count == 2
+
+    state = State(".klaviyo-tc/state.db")
+    chunk_1_keys = keys[:100]
+    chunk_2_key = keys[100]
+    for key in chunk_1_keys:
+        i = int(key.rsplit("v", 1)[1])
+        assert state.get_written(TRANSLATION_ID, key, "fr") == f"translated {i}"
+    assert state.get_written(TRANSLATION_ID, chunk_2_key, "fr") is None
+
+    # Klaviyo now reflects the 100 successful writes; the 101st is still empty.
+    updated_values = [
+        {
+            "id": k,
+            "source_value": f"source {i}",
+            "translations": {"fr": f"translated {i}"} if k in chunk_1_keys else {},
+        }
+        for i, k in enumerate(keys)
+    ]
+    get_route.respond(json=klaviyo_translation_payload(TRANSLATION_ID, target_locales=["fr"], values=updated_values))
+    patch_route.respond(json={"data": {"type": "translation", "id": TRANSLATION_ID, "attributes": {}}})
+
+    second = runner.invoke(cli, ["pull"])
+    assert second.exit_code == 0, second.output
+    assert "conflict" not in second.output
+    assert state.get_written(TRANSLATION_ID, chunk_2_key, "fr") == f"translated 100"
 
 
 @respx.mock

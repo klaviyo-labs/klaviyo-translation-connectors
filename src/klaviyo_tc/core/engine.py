@@ -8,6 +8,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass, field
 
+from ..klaviyo import PATCH_CHUNK_SIZE
 from . import placeholders
 from .config import Config
 from .state import State
@@ -78,6 +79,15 @@ def push_translation(*, config: Config, state: State, klaviyo, provider, transla
     if generation is None:
         generation_id = state.create_generation(translation_id, file_name, strings, included)
         generation = state.get_generation(generation_id)
+    elif generation["sent_snapshot"] != strings or generation["locales"] != included:
+        # Resuming: keep the snapshot in sync with what we're about to (re)upload.
+        state.update_generation_snapshot(generation["id"], strings, included)
+        generation["sent_snapshot"] = strings
+        generation["locales"] = included
+
+    def checkpoint(provider_state: dict) -> None:
+        # Persisted immediately so a crash mid-submit resumes past what already succeeded.
+        state.set_provider_state(generation["id"], provider_state)
 
     submit_result = provider.submit(
         translation_id=translation_id,
@@ -86,6 +96,7 @@ def push_translation(*, config: Config, state: State, klaviyo, provider, transla
         target_locales=list(included.values()),
         reference=generation["id"],
         state=generation["provider_state"],
+        checkpoint=checkpoint,
     )
     state.set_provider_state(generation["id"], submit_result.state)
     if submit_result.submitted:
@@ -98,7 +109,7 @@ def push_translation(*, config: Config, state: State, klaviyo, provider, transla
 
 def _classify(
     *, value_id: str, translated: str, sent_snapshot: dict, current_values: dict, klaviyo_locale: str,
-    pattern: str, state: State, translation_id: str, force: bool,
+    state: State, translation_id: str, force: bool,
 ) -> str:
     if value_id not in sent_snapshot:
         return "unknown_key"
@@ -107,15 +118,19 @@ def _classify(
         return "deleted"
     if current.get("source_value") != sent_snapshot[value_id]:
         return "stale_source"
-    if not placeholders.matches(sent_snapshot[value_id], translated, pattern):
+    if not placeholders.matches(sent_snapshot[value_id], translated):
         return "placeholder_mismatch"
 
     existing = (current.get("translations") or {}).get(klaviyo_locale, "")
-    last_written = state.get_written(translation_id, value_id, klaviyo_locale)
-    if existing and existing != last_written and not force:
-        return "conflict"
     if existing == translated:
         return "unchanged"
+
+    # A `written` record but a different (possibly cleared/empty) current
+    # value means someone touched it in Klaviyo since our last write.
+    last_written = state.get_written(translation_id, value_id, klaviyo_locale)
+    normalized_last_written = last_written if last_written is not None else ""
+    if existing != normalized_last_written and not force:
+        return "conflict"
     return "written"
 
 
@@ -129,7 +144,6 @@ def pull_translation(
     completed_locales = set(provider.completed_locales(generation["provider_state"]))
     klaviyo_data = klaviyo.get_translation(translation_id)
     current_values = {v["id"]: v for v in klaviyo_data["attributes"].get("values", [])}
-    pattern = config.klaviyo.placeholder_pattern
 
     result = PullResult(translation_id=translation_id, dry_run=dry_run)
 
@@ -150,7 +164,6 @@ def pull_translation(
                 sent_snapshot=generation["sent_snapshot"],
                 current_values=current_values,
                 klaviyo_locale=klaviyo_locale,
-                pattern=pattern,
                 state=state,
                 translation_id=translation_id,
                 force=force,
@@ -159,13 +172,41 @@ def pull_translation(
             if outcome == "written":
                 to_patch.append({"id": value_id, "translations": {klaviyo_locale: translated}})
 
-        if not dry_run:
-            if to_patch:
-                klaviyo.patch_translation(translation_id, to_patch)
-                for entry in to_patch:
+        if not dry_run and to_patch:
+            # No conditional write in the Klaviyo API: re-check right before writing.
+            fresh_data = klaviyo.get_translation(translation_id)
+            fresh_values = {v["id"]: v for v in fresh_data["attributes"].get("values", [])}
+            still_eligible = []
+            for entry in to_patch:
+                value_id = entry["id"]
+                translated = entry["translations"][klaviyo_locale]
+                fresh_outcome = _classify(
+                    value_id=value_id,
+                    translated=translated,
+                    sent_snapshot=generation["sent_snapshot"],
+                    current_values=fresh_values,
+                    klaviyo_locale=klaviyo_locale,
+                    state=state,
+                    translation_id=translation_id,
+                    force=force,
+                )
+                if fresh_outcome == "written":
+                    still_eligible.append(entry)
+                else:
+                    counts["written"] -= 1
+                    counts[fresh_outcome] += 1
+            to_patch = still_eligible
+
+            for start in range(0, len(to_patch), PATCH_CHUNK_SIZE):
+                chunk = to_patch[start : start + PATCH_CHUNK_SIZE]
+                klaviyo.patch_translation(translation_id, chunk)
+                # Record per chunk: a later chunk failing shouldn't lose this one's writes.
+                for entry in chunk:
                     state.record_written(
                         translation_id, entry["id"], klaviyo_locale, entry["translations"][klaviyo_locale], generation["id"]
                     )
+
+        if not dry_run:
             state.record_pull_status(generation["id"], klaviyo_locale, len(downloaded), counts["written"])
 
         result.locale_outcomes.append(LocalePullOutcome(locale=klaviyo_locale, counts=dict(counts)))
