@@ -7,6 +7,7 @@ klaviyo:
   fallback_locale: en
   # Flows/tags/templates use their own GA revision, not klaviyo.revision.
   revisions:
+    campaigns: "2025-10-15"
     flows: "2025-10-15"
     tags: "2025-10-15"
     templates: "2025-10-15"

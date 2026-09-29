@@ -1,11 +1,9 @@
 """Resolve --campaign/--flow/--tag/--template/--universal-content/--all/--id scope
 selectors to translation ids.
 
-Campaign -> message -> variation and flow -> action -> message traversal, and
-tag -> campaigns/flows relationships, follow Klaviyo's general JSON:API
-conventions but were not individually verified against a live account (see
-klaviyo.py's module docstring and README.md/docs/setup-guide.md). Templates
-and universal content use Klaviyo's GA Templates API instead.
+Campaigns resolve through the GA Campaigns API (message id == variation id),
+falling back to beta omni traversal; see klaviyo.py's module docstring.
+Templates and universal content use Klaviyo's GA Templates API.
 """
 from __future__ import annotations
 
@@ -36,7 +34,7 @@ class ResolvedResource:
 @dataclass
 class ScopeItem:
     resource: ResolvedResource
-    outcome: str  # "resolved" | "created" | "no_translation" | "error"
+    outcome: str  # "resolved" | "created" | "would_create" | "no_translation" | "error"
     translation_id: str | None = None
     detail: str | None = None
     single_html_body: bool = False
@@ -64,13 +62,29 @@ class ScopeResult:
 
 def _message_channel(message: dict) -> str | None:
     attrs = message.get("attributes", {}) or {}
-    return attrs.get("channel") or (attrs.get("definition") or {}).get("channel")
+    channel = attrs.get("channel") or (attrs.get("definition") or {}).get("channel")
+    # Flow messages report "Email"; the Translations API only accepts lowercase channels.
+    return channel.lower() if channel else None
 
 
 def resolve_campaign(klaviyo: KlaviyoClient, campaign_id: str) -> tuple[str, list[ResolvedResource]]:
-    name = klaviyo.get_campaign(campaign_id)["attributes"]["name"]
+    try:
+        name = klaviyo.get_campaign(campaign_id)["attributes"]["name"]
+    except KlaviyoAPIError as exc:
+        if exc.status_code != 404:
+            raise
+        return _resolve_omni_campaign(klaviyo, campaign_id)
+    resources = [
+        ResolvedResource(CAMPAIGN_VARIATION, message["id"], _message_channel(message), name)
+        for message in klaviyo.list_campaign_messages(campaign_id)
+    ]
+    return name, resources
+
+
+def _resolve_omni_campaign(klaviyo: KlaviyoClient, campaign_id: str) -> tuple[str, list[ResolvedResource]]:
+    name = klaviyo.get_campaign(campaign_id, omni=True)["attributes"]["name"]
     resources = []
-    for message in klaviyo.list_campaign_messages(campaign_id):
+    for message in klaviyo.list_campaign_messages(campaign_id, omni=True):
         channel = _message_channel(message)
         for variation in klaviyo.list_campaign_variations(message["id"]):
             resources.append(ResolvedResource(CAMPAIGN_VARIATION, variation["id"], channel, name))
@@ -135,7 +149,9 @@ def resolve_tag(klaviyo: KlaviyoClient, tag_name: str) -> list[ResolvedResource]
     return resources
 
 
-def _resolve_translation(klaviyo: KlaviyoClient, resource: ResolvedResource, *, create_missing: bool, config) -> ScopeItem:
+def _resolve_translation(
+    klaviyo: KlaviyoClient, resource: ResolvedResource, *, create_missing: bool, dry_run: bool, config
+) -> ScopeItem:
     single_html_body = resource.editor_type in SINGLE_HTML_BODY_EDITOR_TYPES
 
     def item(outcome: str, *, translation_id: str | None = None, detail: str | None = None) -> ScopeItem:
@@ -151,6 +167,8 @@ def _resolve_translation(klaviyo: KlaviyoClient, resource: ResolvedResource, *, 
 
     if not create_missing:
         return item("no_translation")
+    if dry_run:
+        return item("would_create")
 
     try:
         created = klaviyo.create_translation(
@@ -186,6 +204,7 @@ def resolve_scope(
     template_channel: str = "email",
     create_missing: bool,
     config,
+    dry_run: bool = False,
 ) -> ScopeResult:
     resources: list[ResolvedResource] = []
     names: list[str] = []
@@ -225,5 +244,5 @@ def resolve_scope(
         names.append("universal content")
 
     description = ", ".join(names) if names else "?"
-    items = [_resolve_translation(klaviyo, resource, create_missing=create_missing, config=config) for resource in resources]
+    items = [_resolve_translation(klaviyo, resource, create_missing=create_missing, dry_run=dry_run, config=config) for resource in resources]
     return ScopeResult(description=description, items=items)

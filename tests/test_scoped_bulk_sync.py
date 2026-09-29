@@ -55,15 +55,16 @@ def _mock_single_batch_smartling(job_uid="job-1", batch_uid="batch-1"):
 
 
 @respx.mock
-def test_push_campaign_resolves_messages_and_variations_into_one_job(project, runner):
+def test_push_campaign_resolves_messages_into_one_job(project, runner):
     campaign_id = "campaign-1"
     var_a = "campaign-variation::email::var-a"
     var_b = "campaign-variation::email::var-b"
 
     mock_klaviyo_get_campaign(respx, campaign_id, "Summer Sale")
-    mock_klaviyo_campaign_messages(respx, campaign_id, [{"id": "msg-1", "attributes": {"channel": "email"}}])
-    mock_klaviyo_campaign_variations(
-        respx, "msg-1", [{"id": "var-a"}, {"id": "var-b"}]
+    # A GA campaign message's id is its translation's campaign-variation id.
+    mock_klaviyo_campaign_messages(
+        respx, campaign_id,
+        [{"id": "var-a", "attributes": {"channel": "email"}}, {"id": "var-b", "attributes": {"channel": "email"}}],
     )
     mock_klaviyo_find_translation_for_resource(respx, "var-a", var_a)
     mock_klaviyo_find_translation_for_resource(respx, "var-b", var_b)
@@ -154,8 +155,7 @@ def test_push_tag_resolves_both_campaigns_and_flows(project, runner):
     mock_klaviyo_tag_flows(respx, "tag-1", [flow_id])
 
     mock_klaviyo_get_campaign(respx, campaign_id, "Summer Sale")
-    mock_klaviyo_campaign_messages(respx, campaign_id, [{"id": "msg-1", "attributes": {"channel": "email"}}])
-    mock_klaviyo_campaign_variations(respx, "msg-1", [{"id": "var-a"}])
+    mock_klaviyo_campaign_messages(respx, campaign_id, [{"id": "var-a", "attributes": {"channel": "email"}}])
     mock_klaviyo_find_translation_for_resource(respx, "var-a", var_id)
     mock_klaviyo_get_translation(
         respx, var_id, target_locales=["fr"],
@@ -200,8 +200,7 @@ def test_push_create_missing_posts_expected_body_and_pushes_it(project, runner):
     created_id = "campaign-variation::email::var-a"
 
     mock_klaviyo_get_campaign(respx, campaign_id, "Summer Sale")
-    mock_klaviyo_campaign_messages(respx, campaign_id, [{"id": "msg-1", "attributes": {"channel": "email"}}])
-    mock_klaviyo_campaign_variations(respx, "msg-1", [{"id": var_id}])
+    mock_klaviyo_campaign_messages(respx, campaign_id, [{"id": var_id, "attributes": {"channel": "email"}}])
     mock_klaviyo_find_translation_for_resource(respx, var_id, translation_id=None)
     create_route = mock_klaviyo_create_translation(respx, created_id)
     mock_klaviyo_get_translation(
@@ -240,8 +239,7 @@ def test_push_create_missing_falls_back_to_lookup_on_409(project, runner):
     existing_id = "campaign-variation::email::var-a"
 
     mock_klaviyo_get_campaign(respx, campaign_id, "Summer Sale")
-    mock_klaviyo_campaign_messages(respx, campaign_id, [{"id": "msg-1", "attributes": {"channel": "email"}}])
-    mock_klaviyo_campaign_variations(respx, "msg-1", [{"id": var_id}])
+    mock_klaviyo_campaign_messages(respx, campaign_id, [{"id": var_id, "attributes": {"channel": "email"}}])
 
     find_route = respx.get(
         f"{KLAVIYO_BASE}/api/translations/", params={"filter": f'equals(related_resource_id,"{var_id}")'}
@@ -272,8 +270,7 @@ def test_push_create_missing_falls_back_to_lookup_on_409(project, runner):
 def test_push_without_create_missing_reports_no_translation_and_does_not_push(project, runner):
     campaign_id = "campaign-1"
     mock_klaviyo_get_campaign(respx, campaign_id, "Summer Sale")
-    mock_klaviyo_campaign_messages(respx, campaign_id, [{"id": "msg-1", "attributes": {"channel": "email"}}])
-    mock_klaviyo_campaign_variations(respx, "msg-1", [{"id": "var-a"}])
+    mock_klaviyo_campaign_messages(respx, campaign_id, [{"id": "var-a", "attributes": {"channel": "email"}}])
     mock_klaviyo_find_translation_for_resource(respx, "var-a", translation_id=None)
     # No Smartling routes registered at all: any provider call fails the test.
 
@@ -526,3 +523,62 @@ def test_pull_verbose_shows_per_translation_detail(project, runner):
     result = runner.invoke(cli, ["pull", "--id", translation_id, "--verbose"])
     assert result.exit_code == 0, result.output
     assert f"{translation_id} [fr]: written=1" in result.output
+
+
+@respx.mock
+def test_push_campaign_falls_back_to_omni_variations_when_ga_campaign_is_missing(project, runner):
+    campaign_id = "omni-1"
+    var_id = "campaign-variation::email::var-a"
+    respx.get(f"{KLAVIYO_BASE}/api/campaigns/{campaign_id}/", headers={"revision": "2025-10-15"}).respond(
+        status_code=404, json={"errors": [{"detail": "Campaign not found"}]}
+    )
+    respx.get(f"{KLAVIYO_BASE}/api/campaigns/{campaign_id}/", headers={"revision": "2026-07-15.pre"}).respond(
+        json={"data": {"type": "campaign", "id": campaign_id, "attributes": {"name": "Omni Sale"}}}
+    )
+    messages_route = mock_klaviyo_campaign_messages(
+        respx, campaign_id, [{"id": "msg-1", "attributes": {"definition": {"channel": "email"}}}]
+    )
+    mock_klaviyo_campaign_variations(respx, "msg-1", [{"id": "var-a"}])
+    mock_klaviyo_find_translation_for_resource(respx, "var-a", var_id)
+
+    result = runner.invoke(cli, ["push", "--campaign", campaign_id, "--dry-run"])
+    assert result.exit_code == 0, result.output
+    assert "Scope: Omni Sale -- resolved: 1" in result.output
+    assert messages_route.calls.last.request.headers["revision"] == "2026-07-15.pre"
+
+
+@respx.mock
+def test_dry_run_create_missing_reports_would_create_without_writing(project, runner):
+    flow_id = "flow-1"
+    mock_klaviyo_get_flow(respx, flow_id, "Welcome Series")
+    mock_klaviyo_flow_actions(respx, flow_id, [{"id": "action-1"}])
+    mock_klaviyo_flow_messages(respx, "action-1", [{"id": "msg-1", "attributes": {"channel": "Email"}}])
+    mock_klaviyo_find_translation_for_resource(respx, "msg-1", translation_id=None)
+    create_route = respx.post(f"{KLAVIYO_BASE}/api/translations/").respond(status_code=500)
+
+    result = runner.invoke(cli, ["push", "--flow", flow_id, "--create-missing", "--dry-run"])
+    assert result.exit_code == 0, result.output
+    assert "would_create: 1" in result.output
+    assert create_route.calls.call_count == 0
+
+
+@respx.mock
+def test_create_missing_lowercases_flow_message_channel(project, runner):
+    flow_id = "flow-1"
+    created_id = "flow-message::email::msg-1"
+    mock_klaviyo_get_flow(respx, flow_id, "Welcome Series")
+    mock_klaviyo_flow_actions(respx, flow_id, [{"id": "action-1"}])
+    # Flow messages report a capitalized channel; the Translations API rejects it.
+    mock_klaviyo_flow_messages(respx, "action-1", [{"id": "msg-1", "attributes": {"channel": "Email"}}])
+    mock_klaviyo_find_translation_for_resource(respx, "msg-1", translation_id=None)
+    create_route = mock_klaviyo_create_translation(respx, created_id)
+    mock_klaviyo_get_translation(
+        respx, created_id, target_locales=["fr"],
+        values=[{"id": f"{created_id}::subject", "source_value": "Welcome", "translations": {}}],
+    )
+    mock_smartling_auth(respx)
+    _mock_single_batch_smartling()
+
+    result = runner.invoke(cli, ["push", "--flow", flow_id, "--create-missing"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(create_route.calls.last.request.content)["data"]["attributes"]["channel"] == "email"

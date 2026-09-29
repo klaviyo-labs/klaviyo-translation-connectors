@@ -13,7 +13,7 @@ DEFAULT_LOCALE = "en"
 # Flows, tags, and templates are GA endpoints with their own revision,
 # independent of the beta campaign/translations revision above.
 DEFAULT_REVISION_OVERRIDES = {
-    "flows": "2025-10-15", "tags": "2025-10-15", "templates": "2025-10-15", "universal_content": "2025-10-15"
+    "campaigns": "2025-10-15", "flows": "2025-10-15", "tags": "2025-10-15", "templates": "2025-10-15", "universal_content": "2025-10-15"
 }
 DEFAULT_FILES_PER_BATCH = 100
 DEFAULT_AUTHORIZE = True
@@ -31,6 +31,7 @@ klaviyo:
   fallback_locale: en
   # Flows/tags/templates use their own GA revision, not klaviyo.revision.
   revisions:
+    campaigns: "2025-10-15"
     flows: "2025-10-15"
     tags: "2025-10-15"
     templates: "2025-10-15"

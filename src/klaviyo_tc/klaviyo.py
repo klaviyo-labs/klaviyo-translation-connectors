@@ -9,9 +9,11 @@ Endpoint contract (verified from Klaviyo source):
   Templates API) support `contains(name,...)` / `greater-than(updated,...)`
   filters; single-item `get_template` follows from the plural route.
 
-Campaign/flow/tag relationship paths below follow Klaviyo's general JSON:API
-conventions but were not individually verified against a live account; see
-docs/setup-guide.md and README.md for the same caveat.
+- A GA (2025-10-15) campaign message's id is its translation's
+  `campaign-variation` id; beta revisions return 404 for GA campaigns
+  (verified live). Omni campaigns fall back to message -> variation traversal,
+  which is not yet verified against a live account.
+- Flow -> action -> message and tag -> campaigns/flows paths were verified live.
 `get_universal_content_item` (a single-item GET) is inferred by symmetry with
 `get_template` and was not given in the Templates API contract either.
 """
@@ -161,15 +163,21 @@ class KlaviyoClient:
 
     # -- Campaigns ----------------------------------------------------------
 
-    def get_campaign(self, campaign_id: str) -> dict:
-        response = self._request("GET", f"/api/campaigns/{campaign_id}/")
+    def _campaign_revision(self, omni: bool) -> str | None:
+        # Beta (omni) revisions can't see campaigns made with the GA Campaigns API, and vice versa.
+        return self.revision if omni else self.revisions.get("campaigns")
+
+    def get_campaign(self, campaign_id: str, *, omni: bool = False) -> dict:
+        response = self._request("GET", f"/api/campaigns/{campaign_id}/", revision=self._campaign_revision(omni))
         return response.json()["data"]
 
-    def list_campaign_messages(self, campaign_id: str) -> list[dict]:
-        return list(self._paginated(f"/api/campaigns/{campaign_id}/campaign-messages"))
+    def list_campaign_messages(self, campaign_id: str, *, omni: bool = False) -> list[dict]:
+        return list(
+            self._paginated(f"/api/campaigns/{campaign_id}/campaign-messages", revision=self._campaign_revision(omni))
+        )
 
     def list_campaign_variations(self, message_id: str) -> list[dict]:
-        return list(self._paginated(f"/api/campaign-messages/{message_id}/campaign-variations"))
+        return list(self._paginated(f"/api/campaign-messages/{message_id}/campaign-variations", revision=self.revision))
 
     # -- Flows (GA revision override) ---------------------------------------
 

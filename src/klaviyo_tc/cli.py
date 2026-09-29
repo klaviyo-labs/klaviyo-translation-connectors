@@ -161,6 +161,7 @@ def resolve_scope(
     channel: str | None = None,
     resource_type: str | None = None,
     create_missing: bool = False,
+    dry_run: bool = False,
     default_to_tracked: bool = False,
 ) -> Scope:
     template_family = bool(template_ids) or templates_all or bool(universal_content_ids) or all_universal_content
@@ -190,7 +191,8 @@ def resolve_scope(
 
     if campaign_ids or flow_ids:
         scope_result = scopes.resolve_scope(
-            ctx.klaviyo, campaign_ids=list(campaign_ids), flow_ids=list(flow_ids), create_missing=create_missing, config=ctx.config
+            ctx.klaviyo, campaign_ids=list(campaign_ids), flow_ids=list(flow_ids), create_missing=create_missing,
+            dry_run=dry_run, config=ctx.config,
         )
         if len(campaign_ids) + len(flow_ids) == 1:
             job_name_base = f"Klaviyo: {scope_result.description}"
@@ -205,7 +207,9 @@ def resolve_scope(
         )
 
     if tag_name:
-        scope_result = scopes.resolve_scope(ctx.klaviyo, tag_name=tag_name, create_missing=create_missing, config=ctx.config)
+        scope_result = scopes.resolve_scope(
+            ctx.klaviyo, tag_name=tag_name, create_missing=create_missing, dry_run=dry_run, config=ctx.config
+        )
         return Scope(
             scope_result.translation_ids, f"tag '{tag_name}'", f"tag:{tag_name}", f"Klaviyo: {tag_name}", scope_result
         )
@@ -220,6 +224,7 @@ def resolve_scope(
         updated_since=updated_since,
         template_channel=template_channel,
         create_missing=create_missing,
+        dry_run=dry_run,
         config=ctx.config,
     )
     named_singles = len(template_ids) + len(universal_content_ids)
@@ -256,6 +261,7 @@ def _print_resolution_summary(scope: Scope) -> None:
         f"Scope: {scope.description} -- resolved: {by_outcome.get('resolved', 0) + by_outcome.get('created', 0)}, "
         f"no_translation: {by_outcome.get('no_translation', 0)}, created: {by_outcome.get('created', 0)}, "
         f"errors: {by_outcome.get('error', 0)}, single_html_body: {len(scope.scope_result.single_html_body_items)}"
+        + (f", would_create: {by_outcome['would_create']}" if by_outcome.get("would_create") else "")
     )
 
 
@@ -328,6 +334,7 @@ def push(
         template_ids=template_ids, templates_all=templates_all, universal_content_ids=universal_content_ids,
         all_universal_content=all_universal_content, name_contains=name_contains, updated_since=updated_since,
         template_channel=template_channel, channel=channel, resource_type=resource_type, create_missing=create_missing,
+        dry_run=dry_run,
     )
     _print_resolution_summary(scope)
 

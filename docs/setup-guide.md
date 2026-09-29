@@ -194,19 +194,21 @@ without it, resources with no translation are reported as `no_translation` and l
 synced, but flagged `single_html_body` in the summary since it stores one HTML body value
 rather than per-string content.
 
-Two caveats worth knowing before you rely on the campaign/flow/tag side of this:
+How campaigns, flows and tags are resolved:
 
-- **The Klaviyo Campaigns API used here is beta**, like Translations itself; its shape can
-  change under you. Templates use Klaviyo's GA Templates API instead.
-- The campaign → campaign-message → campaign-variation and flow → flow-action → flow-message
-  traversal, and the tag → campaigns/flows relationship lookups, follow Klaviyo's general
-  JSON:API conventions but were **not individually verified against a live account**. If a
-  request 404s or comes back empty where you expect data, check
+- **Campaigns** use Klaviyo's GA Campaigns API. Each campaign message's id is its translation's
+  `campaign-variation` id. A campaign the GA API can't find is retried through the beta (omni)
+  Campaigns API, which lists variations per message; that fallback hasn't been checked against a
+  live omni campaign yet.
+- **Flows** walk flow → flow-action → flow-message, and **tags** read the tag's campaign and flow
+  relationships.
+- If a request 404s or comes back empty where you expect data, check
   [`klaviyo_tc/klaviyo.py`](../src/klaviyo_tc/klaviyo.py) and
-  [`klaviyo_tc/scopes.py`](../src/klaviyo_tc/scopes.py) for the exact paths in use, and please
-  open an issue (or a PR) with what you found on your account.
+  [`klaviyo_tc/scopes.py`](../src/klaviyo_tc/scopes.py), and please open an issue.
 
-Flows, tags, and templates are GA APIs and use their own Klaviyo API revision, independent of
+`--dry-run` never writes to Klaviyo: with `--create-missing` it reports `would_create` instead.
+
+Campaigns, flows, tags, and templates are GA APIs and use their own Klaviyo API revision, independent of
 `klaviyo.revision` used for campaigns and translations; see `klaviyo.revisions` in
 `config.yaml` if Klaviyo ships a newer one.
 

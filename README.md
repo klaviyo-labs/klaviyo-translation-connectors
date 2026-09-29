@@ -109,10 +109,8 @@ translation whose content hasn't changed since its last submitted push.
 templates are still synced but flagged as `single_html_body` in the summary
 (see [Limitations](#limitations)). See
 [`docs/setup-guide.md`](docs/setup-guide.md#sync-a-whole-campaign--flow--tag--template)
-for a walkthrough, including the campaign/flow/tag relationship endpoints
-this inferred from Klaviyo's general JSON:API conventions (not individually
-verified against a live account -- see the caveat there and in
-`klaviyo_tc/klaviyo.py`).
+for a walkthrough. Campaigns resolve through Klaviyo's GA Campaigns API, where
+a campaign message's id is its translation's `campaign-variation` id.
 
 ## Outcome meanings (`pull`)
 

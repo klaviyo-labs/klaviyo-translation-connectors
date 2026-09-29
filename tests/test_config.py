@@ -24,7 +24,8 @@ def test_template_round_trips_through_load_config(tmp_path, monkeypatch):
     assert config.provider_config["placeholder_format_custom"] == PLACEHOLDER_FORMAT_CUSTOM
     assert config.klaviyo.revision == "2026-07-15.pre"
     assert config.klaviyo.revisions == {
-        "flows": "2025-10-15", "tags": "2025-10-15", "templates": "2025-10-15", "universal_content": "2025-10-15"
+        "campaigns": "2025-10-15", "flows": "2025-10-15", "tags": "2025-10-15", "templates": "2025-10-15",
+        "universal_content": "2025-10-15",
     }
     assert config.locales == {"fr": "fr-FR", "de": "de-DE"}
 
