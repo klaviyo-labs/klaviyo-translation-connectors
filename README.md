@@ -32,7 +32,9 @@ The sync engine (`klaviyo_tc/core/`) is provider-agnostic; see
 - A Smartling plan with API access and a project-scoped API token
   (`userIdentifier` / `userSecret`).
 - The target locales you want to translate enabled on each Klaviyo
-  translation (`ksb push` warns and skips any that aren't).
+  translation (`klaviyo-tc push` warns and skips any that aren't).
+
+**New here? Follow the step-by-step [setup guide](docs/setup-guide.md).**
 
 ## Install
 
