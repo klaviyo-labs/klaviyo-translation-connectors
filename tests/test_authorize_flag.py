@@ -77,7 +77,7 @@ def _use_workflow(tmp_path, workflow_uid):
 
 @respx.mock
 def test_push_authorizes_into_the_configured_workflow(project, runner):
-    _use_workflow(project, "4cd36f5d1305")
+    _use_workflow(project, "abc123workflow")
     mock_klaviyo_get_translation(respx, TRANSLATION_ID, target_locales=["fr"], values=VALUES)
     mock_smartling_auth(respx)
     batch_route, _ = _mock_job_batch_upload_poll()
@@ -86,12 +86,12 @@ def test_push_authorizes_into_the_configured_workflow(project, runner):
     assert result.exit_code == 0, result.output
 
     batch_body = json.loads(batch_route.calls.last.request.content)
-    assert batch_body["localeWorkflows"] == [{"targetLocaleId": "fr-FR", "workflowUid": "4cd36f5d1305"}]
+    assert batch_body["localeWorkflows"] == [{"targetLocaleId": "fr-FR", "workflowUid": "abc123workflow"}]
 
 
 @respx.mock
 def test_no_authorize_ignores_the_configured_workflow(project, runner):
-    _use_workflow(project, "4cd36f5d1305")
+    _use_workflow(project, "abc123workflow")
     mock_klaviyo_get_translation(respx, TRANSLATION_ID, target_locales=["fr"], values=VALUES)
     mock_smartling_auth(respx)
     batch_route, _ = _mock_job_batch_upload_poll()
