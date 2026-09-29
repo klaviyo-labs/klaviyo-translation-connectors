@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# local state and config (contain project ids / project-local paths, not secrets, but keep out of git anyway)
+.klaviyo-tc/
+klaviyo-tc.toml
+.env
