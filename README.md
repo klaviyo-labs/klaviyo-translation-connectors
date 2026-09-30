@@ -70,9 +70,10 @@ To keep the `ktc` alias in new terminals, add it to your shell profile once:
 echo "alias ktc=\"$PWD/.venv/bin/klaviyo-tc\"" >> ~/.zshrc   # or ~/.bashrc
 ```
 
-The rest of this README writes the command as `klaviyo-tc`; `ktc` is the same
-thing. Cron jobs and scripts don't read shell aliases, so use the full
-`.venv/bin/klaviyo-tc` path there.
+The rest of this README writes the command as `klaviyo-tc`. That name is on
+your `PATH` only after `source .venv/bin/activate`; otherwise type `ktc` (with
+the alias above) or the full `.venv/bin/klaviyo-tc`. Cron jobs and scripts
+don't read shell aliases, so use the full path there.
 
 Run every command, manual or scheduled, from the directory that holds
 `config.yaml`: the tool reads it and keeps its state in `.klaviyo-tc/`
@@ -115,7 +116,10 @@ Templates work the same way: `push --templates --name-contains "..."` or
   rejected as `placeholder_mismatch`.
 - If the English source changes after a push, `pull` skips it as `stale_source`
   until you push again.
-- A push that fails part-way resumes the same Smartling job when you rerun it.
+- If a push is interrupted while uploading to Smartling, rerunning it resumes
+  the same job instead of creating a duplicate. (A translation that couldn't be
+  read from Klaviyo at all is reported as an error, and goes into a new job when
+  you rerun.)
 - `push` and `pull` accept `--dry-run`, and rerunning either is safe.
 
 ## Typical commands
@@ -127,8 +131,9 @@ klaviyo-tc pull                         # run on a cron once linguists publish
 klaviyo-tc status                       # see active generations and last pull counts
 ```
 
-`push --dry-run` prints what would be sent without calling Smartling or
-writing anything. `pull --dry-run` reads Smartling and Klaviyo and reports
+`push --dry-run` prints the source content of everything in scope without
+calling Smartling or writing anything. It includes translations a real push
+would skip as unchanged. `pull --dry-run` reads Smartling and Klaviyo and reports
 what it would write, without writing to Klaviyo.
 
 ## Scoped sync (campaign / flow / tag / template)

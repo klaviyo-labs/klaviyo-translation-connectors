@@ -118,14 +118,14 @@ List the first 100 of your account's translations (`-g` stops curl treating the 
 curl -sg "https://a.klaviyo.com/api/translations/?page[size]=100" \
   -H "Authorization: Klaviyo-API-Key $KLAVIYO_API_KEY" \
   -H "revision: 2026-07-15.pre" \
-  -H "accept: application/vnd.api+json" | python3 -m json.tool | grep '"id"'
+  -H "accept: application/vnd.api+json" | python3 -m json.tool | grep -E '"(id|next)"'
 ```
 
-If you have more than 100, the response's `links.next` URL returns the next page. It's usually easier not to list ids at all: sync by tag, campaign, flow or template instead (see [Sync a whole campaign / flow / tag / template](#sync-a-whole-campaign--flow--tag--template)), or everything in a channel with `push --all --channel email` (or `sms`, `mobile_push`, `whatsapp`).
+The last line, `"next"`, is the URL of the next page if you have more than 100: run the same command on that URL. It's usually easier not to list ids at all: sync by tag, campaign, flow or template instead (see [Sync a whole campaign / flow / tag / template](#sync-a-whole-campaign--flow--tag--template)), or everything in a channel with `push --all --channel email` (or `sms`, `mobile_push`, `whatsapp`).
 
 ## 8. Dry run
 
-Preview what would be sent. A push dry run doesn't call Smartling and doesn't write to Klaviyo or the state database:
+Preview the source content in scope. A push dry run doesn't call Smartling and doesn't write to Klaviyo or the state database. It lists everything in scope, including translations a real push would skip because they haven't changed:
 
 ```bash
 .venv/bin/klaviyo-tc push --id "template::email::XyZ123" --dry-run
@@ -142,7 +142,7 @@ The output lists each string key and its source text. Check that:
 .venv/bin/klaviyo-tc push --id "template::email::XyZ123"
 ```
 
-Each push creates one Smartling job, named `Klaviyo bulk <timestamp> <short id>` (scoped pushes use the scope, for example `Klaviyo: <tag name> <short id>`). The job holds one file per translation, named after the translation id with `::` replaced by `__`, for example `klaviyo/template__email__XyZ123.json`. It is authorized for your mapped locales.
+Each push that has something to send creates one Smartling job (a rerun with nothing changed creates none), named `Klaviyo bulk <timestamp> <short id>` (scoped pushes use the scope, for example `Klaviyo: <tag name> <short id>`). The job holds one file per translation, named after the translation id with `::` replaced by `__`, for example `klaviyo/template__email__XyZ123.json`. It is authorized for your mapped locales.
 
 - **In Smartling:** confirm the job appears and its strings look right.
 - **Pushing again:** once the source has changed, pushing the same translation again uploads the new source to the same file.
