@@ -53,6 +53,16 @@ python3.12 -m venv .venv      # any Python 3.11+; the macOS system python3 may b
 .venv/bin/klaviyo-tc --help   # confirms the install
 ```
 
+Optionally, give it a short alias. Using the absolute path lets `ktc` work from any directory:
+
+```bash
+alias ktc="$PWD/.venv/bin/klaviyo-tc"                          # this terminal only
+echo "alias ktc=\"$PWD/.venv/bin/klaviyo-tc\"" >> ~/.zshrc     # every new terminal (or ~/.bashrc)
+ktc --help
+```
+
+This guide writes the full `.venv/bin/klaviyo-tc` path, and `ktc` works anywhere it appears. Cron jobs and scripts don't read shell aliases, so keep the full path there.
+
 To work on the code itself, clone the repo and run `.venv/bin/pip install -e ".[dev]"` instead.
 
 ## 6. Configure

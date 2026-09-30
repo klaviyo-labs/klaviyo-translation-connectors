@@ -44,6 +44,9 @@ The sync engine (`klaviyo_tc/core/`) is provider-agnostic; see
 python3.12 -m venv .venv
 .venv/bin/pip install "git+https://github.com/klaviyo-labs/klaviyo-translation-connectors"
 
+# Optional: a short `ktc` alias (the full path works from any directory)
+alias ktc="$PWD/.venv/bin/klaviyo-tc"
+
 # 2. Create config.yaml, then set your Smartling project_id and locale mapping in it
 .venv/bin/klaviyo-tc init
 
@@ -60,6 +63,16 @@ export SMARTLING_USER_SECRET="..."
 .venv/bin/klaviyo-tc pull --tag "Ready for translation"
 .venv/bin/klaviyo-tc status
 ```
+
+To keep the `ktc` alias in new terminals, add it to your shell profile once:
+
+```bash
+echo "alias ktc=\"$PWD/.venv/bin/klaviyo-tc\"" >> ~/.zshrc   # or ~/.bashrc
+```
+
+The rest of this README writes the command as `klaviyo-tc`; `ktc` is the same
+thing. Cron jobs and scripts don't read shell aliases, so use the full
+`.venv/bin/klaviyo-tc` path there.
 
 `config.yaml` holds only non-secret ids. The tool refuses to load a config file
 containing anything that looks like a secret (`api_key`, `user_secret`, `token`, ...),
