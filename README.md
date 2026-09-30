@@ -29,7 +29,7 @@ The sync engine (`klaviyo_tc/core/`) is provider-agnostic; see
 
 | You need | Notes |
 |---|---|
-| Python 3.11 or newer | Check with `python3 --version`. On macOS the system `python3` may be older; use `python3.11`/`python3.12` explicitly. |
+| Python 3.11 or newer, and Git | Check with `python3 --version` and `git --version`. On macOS the system `python3` may be older; use `python3.11`/`python3.12` explicitly. |
 | Klaviyo Translations (beta) on your account | Your Klaviyo account team can confirm it's enabled. |
 | A Klaviyo **private API key** | Scopes: `translations:read`, `translations:write`, plus `campaigns:read`, `flows:read`, `tags:read` and `templates:read` to sync by campaign, flow, tag or template. |
 | A Smartling plan with API access | A **project-scoped** API token (User Identifier + Token Secret) and the project ID. |
@@ -44,7 +44,7 @@ The sync engine (`klaviyo_tc/core/`) is provider-agnostic; see
 python3.12 -m venv .venv
 .venv/bin/pip install "git+https://github.com/klaviyo-labs/klaviyo-translation-connectors"
 
-# Optional: a short `ktc` alias (the full path works from any directory)
+# Optional: a short `ktc` alias (the full path finds the command from any directory)
 alias ktc="$PWD/.venv/bin/klaviyo-tc"
 
 # 2. Create config.yaml, then set your Smartling project_id and locale mapping in it
@@ -73,6 +73,10 @@ echo "alias ktc=\"$PWD/.venv/bin/klaviyo-tc\"" >> ~/.zshrc   # or ~/.bashrc
 The rest of this README writes the command as `klaviyo-tc`; `ktc` is the same
 thing. Cron jobs and scripts don't read shell aliases, so use the full
 `.venv/bin/klaviyo-tc` path there.
+
+Run every command, manual or scheduled, from the directory that holds
+`config.yaml`: the tool reads it and keeps its state in `.klaviyo-tc/`
+relative to where it runs.
 
 `config.yaml` holds only non-secret ids. The tool refuses to load a config file
 containing anything that looks like a secret (`api_key`, `user_secret`, `token`, ...),
@@ -112,7 +116,7 @@ Templates work the same way: `push --templates --name-contains "..."` or
 - If the English source changes after a push, `pull` skips it as `stale_source`
   until you push again.
 - A push that fails part-way resumes the same Smartling job when you rerun it.
-- Every command accepts `--dry-run`, and rerunning any command is safe.
+- `push` and `pull` accept `--dry-run`, and rerunning either is safe.
 
 ## Typical commands
 
@@ -123,12 +127,13 @@ klaviyo-tc pull                         # run on a cron once linguists publish
 klaviyo-tc status                       # see active generations and last pull counts
 ```
 
-`--dry-run` on `push`/`pull` computes and prints what would happen without
-calling the provider or writing state.
+`push --dry-run` prints what would be sent without calling Smartling or
+writing anything. `pull --dry-run` reads Smartling and Klaviyo and reports
+what it would write, without writing to Klaviyo.
 
 ## Scoped sync (campaign / flow / tag / template)
 
-`push`/`pull`/`status` also accept a scope instead of `--id`/`--all`:
+`push`/`pull`/`status` also accept a scope instead of `--id`. (`push` also takes `--all`; with no scope, `pull` and `status` cover every translation the tool has pushed.)
 
 ```bash
 klaviyo-tc push --campaign <id> [--campaign <id> ...]   # combinable with --flow
