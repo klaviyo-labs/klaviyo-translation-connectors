@@ -26,7 +26,7 @@ dev = [
 klaviyo-tc = "klaviyo_tc.cli:cli"
 
 [project.urls]
-Homepage = "https://github.com/wannabefro/klaviyo-translation-connectors"
+Homepage = "https://github.com/klaviyo-labs/klaviyo-translation-connectors"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/klaviyo_tc"]

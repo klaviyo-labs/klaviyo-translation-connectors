@@ -1,6 +1,6 @@
 # klaviyo-translation-connectors
 
-[![CI](https://github.com/wannabefro/klaviyo-translation-connectors/actions/workflows/ci.yml/badge.svg)](https://github.com/wannabefro/klaviyo-translation-connectors/actions/workflows/ci.yml)
+[![CI](https://github.com/klaviyo-labs/klaviyo-translation-connectors/actions/workflows/ci.yml/badge.svg)](https://github.com/klaviyo-labs/klaviyo-translation-connectors/actions/workflows/ci.yml)
 ![coverage](https://img.shields.io/badge/coverage-see_pytest--cov_output-informational)
 
 Reference connectors between [Klaviyo Translations](https://developers.klaviyo.com/)
