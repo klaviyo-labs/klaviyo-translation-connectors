@@ -27,48 +27,81 @@ The sync engine (`klaviyo_tc/core/`) is provider-agnostic; see
 
 ## Prerequisites
 
-- A Klaviyo private API key with the `translations:read` and
-  `translations:write` scopes (`translations:write` is also what lets
-  `--create-missing` create one). Add `campaigns:read`, `flows:read`,
-  `tags:read`, and/or `templates:read` to use `--campaign`/`--flow`/`--tag`/
-  `--template`/`--universal-content`.
-- A Smartling plan with API access and a project-scoped API token
-  (`userIdentifier` / `userSecret`).
-- The target locales you want to translate enabled on each Klaviyo
-  translation (`klaviyo-tc push` warns and skips any that aren't).
+| You need | Notes |
+|---|---|
+| Python 3.11 or newer | Check with `python3 --version`. On macOS the system `python3` may be older; use `python3.11`/`python3.12` explicitly. |
+| Klaviyo Translations (beta) on your account | Your Klaviyo account team can confirm it's enabled. |
+| A Klaviyo **private API key** | Scopes: `translations:read`, `translations:write`, plus `campaigns:read`, `flows:read`, `tags:read` and `templates:read` to sync by campaign, flow, tag or template. |
+| A Smartling plan with API access | A **project-scoped** API token (User Identifier + Token Secret) and the project ID. |
+| Somewhere to run it on a schedule | Any machine or container with **durable storage**: the tool keeps its sync state in `.klaviyo-tc/state.db`. |
 
-**New here? Follow the step-by-step [setup guide](docs/setup-guide.md).**
+**New here? The step-by-step [setup guide](docs/setup-guide.md) walks through creating each credential.**
 
-## Install
+## Quick start
 
 ```bash
-python3 -m venv .venv
-.venv/bin/pip install -e ".[dev]"
+# 1. Install (into its own virtual environment)
+python3.12 -m venv .venv
+.venv/bin/pip install "git+https://github.com/klaviyo-labs/klaviyo-translation-connectors"
+
+# 2. Create config.yaml, then set your Smartling project_id and locale mapping in it
+.venv/bin/klaviyo-tc init
+
+# 3. Provide credentials as environment variables (never in the config file)
+export KLAVIYO_API_KEY="pk_..."
+export SMARTLING_USER_IDENTIFIER="..."
+export SMARTLING_USER_SECRET="..."
+
+# 4. Preview, then send one tagged set of campaigns and flows to Smartling
+.venv/bin/klaviyo-tc push --tag "Ready for translation" --create-missing --dry-run
+.venv/bin/klaviyo-tc push --tag "Ready for translation" --create-missing
+
+# 5. After linguists publish in Smartling, write the translations into Klaviyo
+.venv/bin/klaviyo-tc pull --tag "Ready for translation"
+.venv/bin/klaviyo-tc status
 ```
 
-## Configure
+`config.yaml` holds only non-secret ids. The tool refuses to load a config file
+containing anything that looks like a secret (`api_key`, `user_secret`, `token`, ...),
+and it never writes credentials to state or logs.
 
-```bash
-cp config.example.yaml config.yaml   # or: .venv/bin/klaviyo-tc init
-```
+Always preview each language in Klaviyo before sending a translated message.
 
-Edit `config.yaml`: set `providers.smartling.project_id` and map your Klaviyo
-locales to Smartling locale ids under `locales:`. `config.yaml` itself is
-git-ignored, since it holds account-specific ids; `config.example.yaml` is the
-committed, placeholder-valued template both it and `init` are generated from.
+## Recommended workflow
 
-Secrets are read only from environment variables, never from the config file,
-state database, or logs. Loading a config file that has any key resembling a
-secret (`api_key`, `user_secret`, `token`, etc., anywhere in the file) is a
-hard error, on purpose:
+1. **Tag content when it's ready.** Your team adds a Klaviyo tag such as
+   `Ready for translation` to campaigns and flows. That is the only manual step.
+2. **Push on demand or nightly:** `klaviyo-tc push --tag "Ready for translation" --create-missing`.
+   Everything the tag covers goes to Smartling as **one job**; content that hasn't
+   changed since its last push is skipped, and Smartling's translation memory covers
+   strings it has seen before.
+3. **Pull on a schedule**, e.g. every 20 minutes:
 
-```bash
-export KLAVIYO_API_KEY=...
-export SMARTLING_USER_IDENTIFIER=...
-export SMARTLING_USER_SECRET=...
-```
+   ```cron
+   */20 * * * * cd /opt/klaviyo-tc && ./run-pull.sh >> pull.log 2>&1
+   ```
 
-## Typical flow
+   where `run-pull.sh` loads the three environment variables from your secret
+   manager and runs `.venv/bin/klaviyo-tc pull`.
+4. **Review exceptions.** A pull prints one summary line, and lists only the
+   translations that need a person (see [Outcome meanings](#outcome-meanings-pull)).
+
+Templates work the same way: `push --templates --name-contains "..."` or
+`--updated-since 2026-10-01`.
+
+**Safety guarantees**
+
+- A translation someone edits in Klaviyo *after* it was pushed is never
+  overwritten; `pull` reports it as `conflict`. Values Klaviyo pre-fills into a
+  new translation are replaced normally.
+- A translation that adds, drops or changes a `{{ ... }}` or `{% ... %}` tag is
+  rejected as `placeholder_mismatch`.
+- If the English source changes after a push, `pull` skips it as `stale_source`
+  until you push again.
+- A push that fails part-way resumes the same Smartling job when you rerun it.
+- Every command accepts `--dry-run`, and rerunning any command is safe.
+
+## Typical commands
 
 ```bash
 klaviyo-tc push --all --channel email   # or --id <translation-id> ...
@@ -127,6 +160,11 @@ a campaign message's id is its translation's `campaign-variation` id.
 ## Limitations
 
 - No webhooks: run `pull` on a schedule (e.g. cron) after linguists publish.
+- It pins a **beta** Klaviyo API revision (`klaviyo.revision` in `config.yaml`).
+  When Klaviyo retires it, update that value (and this tool).
+- Whole-account sweeps (`--all`, or `--templates` with no filter) make Klaviyo
+  render every message; keep `klaviyo.concurrency` low (default 4) and prefer
+  scoped runs for routine syncs.
 - SIMPLE/CODE templates store a single HTML body value per locale.
 - Campaign/flow/tag scopes don't yet resolve universal content blocks *used
   inside* a campaign or flow message; an `--include-universal-content` flag
@@ -143,6 +181,10 @@ a campaign message's id is its translation's `campaign-variation` id.
 ## Development
 
 ```bash
+git clone https://github.com/klaviyo-labs/klaviyo-translation-connectors
+cd klaviyo-translation-connectors
+python3.12 -m venv .venv
+.venv/bin/pip install -e ".[dev]"
 .venv/bin/pytest -q
 ```
 

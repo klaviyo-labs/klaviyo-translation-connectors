@@ -39,6 +39,8 @@ Use a dedicated key for this tool, so you can revoke it on its own.
 
 The tool writes translations only for locales already enabled on each Klaviyo translation. Locales that aren't enabled are skipped with a warning.
 
+If you use `--create-missing` (see [Sync a whole campaign / flow / tag / template](#sync-a-whole-campaign--flow--tag--template)), the translations it creates are enabled for every locale in your `config.yaml` automatically; this step only matters for translations that already exist.
+
 To enable a locale, turn it on for the message or template in Klaviyo's translation settings. Alternatively, PATCH the translation's `target_locales` through the API.
 
 ## 5. Install
@@ -46,8 +48,9 @@ To enable a locale, turn it on for the message or template in Klaviyo's translat
 The tool isn't published to PyPI yet. Install it from GitHub into a virtual environment:
 
 ```bash
-python3 -m venv .venv
+python3.12 -m venv .venv      # any Python 3.11+; the macOS system python3 may be older
 .venv/bin/pip install "git+https://github.com/klaviyo-labs/klaviyo-translation-connectors"
+.venv/bin/klaviyo-tc --help   # confirms the install
 ```
 
 To work on the code itself, clone the repo and run `.venv/bin/pip install -e ".[dev]"` instead.
@@ -57,7 +60,7 @@ To work on the code itself, clone the repo and run `.venv/bin/pip install -e ".[
 In the directory where you'll run the tool:
 
 ```bash
-cp config.example.yaml config.yaml      # or: .venv/bin/klaviyo-tc init
+.venv/bin/klaviyo-tc init      # writes config.yaml (in a clone of the repo you can also copy config.example.yaml)
 ```
 
 Then edit `config.yaml`:
@@ -77,8 +80,7 @@ locales:                            # Klaviyo locale: Smartling locale
 - The values are the Smartling locale IDs for your project.
 - Only mapped locales are sent or pulled.
 - Leave the other settings at their defaults unless you have a reason to change them.
-- `config.yaml` is git-ignored (it holds account-specific ids); commit
-  `config.example.yaml` instead if you want to share defaults with a team.
+- `config.yaml` holds no secrets, so it's safe to keep in your own deployment repo or config management.
 - The tool refuses to load a config file with a key that looks like a secret
   (`api_key`, `secret`, `token`, etc. anywhere in it) -- secrets only ever
   come from the environment variables in the next section.
@@ -147,7 +149,7 @@ Once your linguists have published translations in Smartling:
 
 - `written`: sent to Klaviyo.
 - `unchanged`: Klaviyo already has this translation.
-- `conflict`: someone edited the value in Klaviyo after the push, or since the tool last wrote it. The Klaviyo version is kept. Rerun with `--force` to overwrite it. Values that were already there at push time, such as the French Klaviyo pre-fills into a new translation from matching strings elsewhere in the account, are replaced without a conflict.
+- `conflict`: someone edited the value in Klaviyo after the push, or since the tool last wrote it. The Klaviyo version is kept. Rerun with `--force` to overwrite it. Values that were already there at push time are replaced without a conflict. For example, Klaviyo pre-fills a new translation with text it already has for matching strings elsewhere in the account.
 - `stale_source`: the Klaviyo source text changed after the push. Push again.
 - `placeholder_mismatch`: the translation adds, drops or reorders template tags. Fix it in Smartling.
 - `deleted` or `unknown_key`: the content no longer exists in Klaviyo, or wasn't part of the push.
@@ -208,9 +210,8 @@ How campaigns, flows and tags are resolved:
 
 `--dry-run` never writes to Klaviyo: with `--create-missing` it reports `would_create` instead.
 
-Campaigns, flows, tags, and templates are GA APIs and use their own Klaviyo API revision, independent of
-`klaviyo.revision` used for campaigns and translations; see `klaviyo.revisions` in
-`config.yaml` if Klaviyo ships a newer one.
+Campaigns, flows, tags, templates and universal content are GA APIs with their own Klaviyo API revision,
+set in `klaviyo.revisions` in `config.yaml`. Only translations use the beta `klaviyo.revision`.
 
 By default, `push` authorizes the Smartling job for your mapped locales as it uploads each
 file. Pass `--no-authorize` (or set `providers.smartling.authorize: false` in `config.yaml`)
@@ -239,6 +240,9 @@ Prefer scoped runs (`--tag`, `--campaign`, `--templates --updated-since`) for ro
 | Smartling `429` | Rate limited. The tool retries with backoff; for large pushes, push fewer translations at a time |
 | Many `stale_source` outcomes | The source was edited after pushing. Push again, then pull after the new strings are translated |
 | Many `conflict` outcomes on a new machine | The state database is missing or was reset (see step 11) |
+| `requires a different Python` during install | Your `python3` is older than 3.11. Create the virtual environment with `python3.11` or `python3.12` |
+| Errors mentioning a timeout or `GetResourcesV2` on large runs | Klaviyo took too long rendering messages. Lower `klaviyo.concurrency`, or scope the run (`--tag`, `--updated-since`) |
+| A scope reports `no_translation` | Those messages have no Klaviyo translation yet. Add `--create-missing` |
 | `placeholder_mismatch` | A linguist changed a `{{ }}` or `{% %}` tag. Correct it in Smartling and publish again |
 
 ## Security notes
