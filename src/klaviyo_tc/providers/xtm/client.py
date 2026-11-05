@@ -57,6 +57,11 @@ def _reason(response: httpx.Response):
     return payload
 
 
+def _indexed(name: str, values: list[str]) -> dict[str, str]:
+    """Multipart array fields as `name[0]`, `name[1]`, the form the spec's form binding accepts."""
+    return {f"{name}[{index}]": value for index, value in enumerate(values)}
+
+
 class XtmClient:
     def __init__(
         self,
@@ -153,14 +158,16 @@ class XtmClient:
         """POST /projects (multipart/form-data) -> RSProjectCreationResponse {projectId, jobs[]}.
 
         `files` is [(xtm_file_name, content, per_file_target_languages_or_None)], sent as
-        `translationFiles[i].file` (+ `translationFiles[i].targetLanguages`).
+        `translationFiles[i].file` (+ `translationFiles[i].targetLanguages[j]`).
         """
-        data = dict(fields)
+        data = {}
+        for key, value in fields.items():
+            data.update(_indexed(key, value) if isinstance(value, list) else {key: value})
         multipart = []
         for index, (name, content, languages) in enumerate(files):
             multipart.append((f"translationFiles[{index}].file", (name, content, "application/json")))
             if languages:
-                data[f"translationFiles[{index}].targetLanguages"] = ",".join(languages)
+                data.update(_indexed(f"translationFiles[{index}].targetLanguages", languages))
         return self._call("POST", "/projects", data=data, files=multipart)
 
     def upload_sources(self, project_id: int, files: list[tuple[str, bytes, list[str] | None]]) -> dict:
@@ -175,7 +182,7 @@ class XtmClient:
         for index, (name, content, languages) in enumerate(files):
             multipart.append((f"files[{index}].file", (name, content, "application/json")))
             if languages:
-                data[f"files[{index}].targetLanguages"] = ",".join(languages)
+                data.update(_indexed(f"files[{index}].targetLanguages", languages))
         return self._call(
             "POST",
             f"/projects/{project_id}/files/sources/upload",

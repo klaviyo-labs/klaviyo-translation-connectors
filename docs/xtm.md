@@ -154,9 +154,9 @@ run ID.
 
 These come from XTM's documentation, but haven't been run against a real instance yet:
 
-- **Multiple target languages** are sent as one comma-separated `targetLanguages` field, as in
-  XTM's knowledge-base example. If your instance needs the field repeated instead, project
-  creation will fail with a 400.
+- **Multiple target languages** are sent as indexed fields (`targetLanguages[0]`,
+  `targetLanguages[1]`), the array form the OpenAPI spec validates. If your instance rejects
+  them, project creation will fail with a 400.
 - **Job file names:** pull matches jobs to messages by `fileName` from the project status. If your
   instance changes uploaded file names (for example by adding a path), report it.
 - **Target ZIP layout:** the downloaded ZIP is searched for the file with the uploaded name, and

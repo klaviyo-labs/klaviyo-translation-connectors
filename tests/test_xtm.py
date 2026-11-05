@@ -168,12 +168,12 @@ def test_push_creates_one_project_with_documented_multipart_fields(xtm_project, 
     fields = parse_multipart(request)
     assert fields["customerId"] == [str(CUSTOMER_ID).encode()]
     assert fields["sourceLanguage"] == [b"en_US"]
-    assert fields["targetLanguages"] == [b"es_ES,fr_FR"]
+    assert (fields["targetLanguages[0]"], fields["targetLanguages[1]"]) == ([b"es_ES"], [b"fr_FR"])
     assert fields["workflowName"] == [b"translate"]
     assert b"/" not in fields["name"][0] and b":" not in fields["name"][0]
     assert json.loads(fields["translationFiles[0].file"][0]) == {SUBJECT_KEY: "Hello {{ first_name }}"}
     # Every language the project has, so no per-file override is sent.
-    assert "translationFiles[0].targetLanguages" not in fields
+    assert not any(key.startswith("translationFiles[0].targetLanguages") for key in fields)
 
     state = State(".klaviyo-tc/state.db")
     generation = state.get_active_generation(TRANSLATION_ID)
@@ -358,8 +358,8 @@ def test_files_with_fewer_languages_send_a_per_file_override(no_sleep):
     _provider(files_per_upload=10).submit_many(run_ref="r", job_name="j", files=files)
 
     fields = parse_multipart(create.calls.last.request)
-    assert "translationFiles[0].targetLanguages" not in fields
-    assert fields["translationFiles[1].targetLanguages"] == [b"fr_FR"]
+    assert not any(key.startswith("translationFiles[0].targetLanguages") for key in fields)
+    assert fields["translationFiles[1].targetLanguages[0]"] == [b"fr_FR"]
 
 
 @respx.mock

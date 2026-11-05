@@ -116,8 +116,7 @@ class XtmProvider:
             fields["templateId"] = str(self.template_id)
         if self.source_language:
             fields["sourceLanguage"] = self.source_language
-        # The KB example sends several target languages as one comma-separated value.
-        fields["targetLanguages"] = ",".join(sorted({locale for f in files for locale in f.target_locales}))
+        fields["targetLanguages"] = sorted({locale for f in files for locale in f.target_locales})
         if self.workflow_id is not None:
             fields["workflowId"] = str(self.workflow_id)
         elif self.workflow_name:
