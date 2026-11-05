@@ -58,7 +58,7 @@ Klaviyo content contains HTML and template tags such as `{{ first_name }}` and
 Unless the tags are locked, linguists can edit them. `pull` catches that and reports
 `placeholder_mismatch`, but it's better to prevent it.
 
-Ask your XTM administrator (or XTM Support, {{EMAIL}}) for a JSON file filter template
+Ask your XTM administrator (or XTM Support) for a JSON file filter template
 that marks these patterns as non-translatable inline tags:
 
 ```

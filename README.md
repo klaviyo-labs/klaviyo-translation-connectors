@@ -36,9 +36,10 @@ The sync engine (`klaviyo_tc/core/`) is provider-agnostic; see
 | Somewhere to run it on a schedule | Any machine or container with **durable storage**: the tool keeps its sync state in `.klaviyo-tc/state.db`. |
 
 **New here? The step-by-step [setup guide](docs/setup-guide.md) walks through creating each credential.**
-Using XTM? Follow [docs/xtm.md](docs/xtm.md) for the XTM-specific steps. The quick start below uses Smartling.
+Using XTM Cloud? Use [Quick start (XTM Cloud)](#quick-start-xtm-cloud) in place of the Smartling steps. The
+notes after the Smartling quick start (alias, working directory, secrets) apply to both.
 
-## Quick start
+## Quick start (Smartling)
 
 ```bash
 # 1. Install (into its own virtual environment)
@@ -85,6 +86,79 @@ containing anything that looks like a secret (`api_key`, `user_secret`, `token`,
 and it never writes credentials to state or logs.
 
 Always preview each language in Klaviyo before sending a translated message.
+
+## Quick start (XTM Cloud)
+
+XTM support is early access: it passes validation against XTM's API spec but hasn't run against a
+live instance yet. Use a **test customer** in XTM for your first runs. The
+[XTM guide](docs/xtm.md) explains each step.
+
+Before you start, collect these from XTM:
+
+| Value | Where to find it |
+|---|---|
+| Client name | The company name you type on the XTM login page |
+| User ID and password | An XTM user with API access (**Users → Access rights → Access through: User Interface and API** or **Only API**) and the project manager role. The ID is under the blue **i** icon next to the user |
+| Customer ID | **Customers**. Every project is created for this customer |
+| Project template ID, **or** a workflow ID or name | **Configuration → Project templates**, or **Configuration → Workflow definitions** |
+| API URL | Your XTM URL plus `/project-manager-api-rest`. For XTM Cloud's shared instance, use `https://api.xtm-cloud.com/project-manager-api-rest` |
+
+Ask your XTM administrator for a JSON file filter template that locks Klaviyo's `{{ }}` and `{% %}` tags
+([details](docs/xtm.md#3-protect-klaviyo-template-tags)). Without it, linguists can edit the tags, and `pull`
+reports those messages as `placeholder_mismatch`.
+
+```bash
+# 1. Install (into its own virtual environment)
+python3.12 -m venv .venv
+.venv/bin/pip install "git+https://github.com/klaviyo-labs/klaviyo-translation-connectors"
+
+# 2. Create config.yaml, then edit it as shown below
+.venv/bin/klaviyo-tc init
+
+# 3. Provide credentials as environment variables (never in the config file)
+export KLAVIYO_API_KEY="pk_..."
+export XTM_CLIENT="YourCompany"
+export XTM_USER_ID="12345"
+export XTM_PASSWORD="..."
+
+# 4. Preview, then send one tagged set of campaigns and flows to XTM as one project
+.venv/bin/klaviyo-tc push --tag "Ready for translation" --create-missing --dry-run
+.venv/bin/klaviyo-tc push --tag "Ready for translation" --create-missing
+
+# 5. After each XTM job finishes its workflow, write the translations into Klaviyo
+.venv/bin/klaviyo-tc pull --tag "Ready for translation"
+.venv/bin/klaviyo-tc status
+```
+
+In `config.yaml`, set the provider to `xtm`, fill in `providers.xtm`, and map each Klaviyo locale to an XTM
+language code. XTM codes use an underscore (`fr_FR`), not a hyphen:
+
+```yaml
+provider:
+  name: xtm
+
+providers:
+  xtm:
+    base_url: https://yourcompany.xtm-intl.com/project-manager-api-rest
+    customer_id: 123
+    template_id: 456            # or 0, and set source_language plus workflow_id or workflow_name
+    source_language: en_US
+    workflow_id: 0
+    workflow_name: ""
+    filter_template_id: ""      # the tag-protecting filter, if it isn't attached to the template
+    start_workflow: false       # false: a project manager starts the workflow in XTM
+    files_per_upload: 50
+
+locales:
+  fr: fr_FR
+  de: de_DE
+```
+
+By default, the project is created but its workflow is not started, so a project manager can review it in XTM
+first. Set `start_workflow: true` to start it automatically.
+
+If something fails, see [XTM troubleshooting](docs/xtm.md#troubleshooting). Please report any problem
+together with the `XTM API error` text. Passwords and tokens are redacted from the output.
 
 ## Recommended workflow
 
