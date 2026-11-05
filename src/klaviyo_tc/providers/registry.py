@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 from .smartling.provider import SmartlingProvider
+from .xtm.provider import XtmProvider
 
 REGISTRY: dict[str, type] = {
     "smartling": SmartlingProvider,
+    "xtm": XtmProvider,
 }
 
 

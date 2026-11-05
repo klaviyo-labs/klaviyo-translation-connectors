@@ -20,7 +20,7 @@ support SLAs, and it uses a beta Klaviyo API whose revision may change.
 | Phrase    | Planned / contributions welcome |
 | Lokalise  | Planned / contributions welcome |
 | Crowdin   | Planned / contributions welcome |
-| XTM       | Planned / contributions welcome |
+| XTM Cloud | Early access: built against XTM's API reference, not yet run against a live instance ([guide](docs/xtm.md)) |
 
 The sync engine (`klaviyo_tc/core/`) is provider-agnostic; see
 [`docs/adding-a-provider.md`](docs/adding-a-provider.md) to add one.
@@ -32,10 +32,11 @@ The sync engine (`klaviyo_tc/core/`) is provider-agnostic; see
 | Python 3.11 or newer, and Git | Check with `python3 --version` and `git --version`. On macOS the system `python3` may be older; use `python3.11`/`python3.12` explicitly. |
 | Klaviyo Translations (beta) on your account | Your Klaviyo account team can confirm it's enabled. |
 | A Klaviyo **private API key** | Scopes: `translations:read`, `translations:write`, plus `campaigns:read`, `flows:read`, `tags:read` and `templates:read` to sync by campaign, flow, tag or template. |
-| A Smartling plan with API access | A **project-scoped** API token (User Identifier + Token Secret) and the project ID. |
+| A Smartling plan with API access, **or** XTM Cloud with an API licence | Smartling: a **project-scoped** API token (User Identifier + Token Secret) and the project ID. XTM: an API user (client name, user ID, password) and a customer ID; see [docs/xtm.md](docs/xtm.md). |
 | Somewhere to run it on a schedule | Any machine or container with **durable storage**: the tool keeps its sync state in `.klaviyo-tc/state.db`. |
 
 **New here? The step-by-step [setup guide](docs/setup-guide.md) walks through creating each credential.**
+Using XTM? Follow [docs/xtm.md](docs/xtm.md) for the XTM-specific steps. The quick start below uses Smartling.
 
 ## Quick start
 
@@ -182,7 +183,7 @@ a campaign message's id is its translation's `campaign-variation` id.
 
 ## Limitations
 
-- No webhooks: run `pull` on a schedule (e.g. cron) after linguists publish.
+- No webhooks (Smartling) or callbacks (XTM): run `pull` on a schedule (e.g. cron) after linguists publish.
 - It pins a **beta** Klaviyo API revision (`klaviyo.revision` in `config.yaml`).
   When Klaviyo retires it, update that value (and this tool).
 - Whole-account sweeps (`--all`, or `--templates` with no filter) make Klaviyo

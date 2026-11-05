@@ -24,6 +24,14 @@ def require_env(name: str) -> str:
     return value
 
 
+def require_int_env(name: str) -> int:
+    value = require_env(name)
+    try:
+        return int(value)
+    except ValueError:
+        raise click.ClickException(f"environment variable {name} must be a whole number") from None
+
+
 def guarded(f):
     """Catch stray exceptions and redact secrets before they ever hit stdout/stderr."""
 
@@ -81,7 +89,7 @@ class Context:
             name = self.config.provider_name
             provider_cls = get_provider_class(name)
             provider_config = self.config.provider_config
-            # Only Smartling is wired up today; see docs/adding-a-provider.md for adding another.
+            # Each provider's secrets come from env vars; see docs/adding-a-provider.md for adding another.
             if name == "smartling":
                 self._provider = provider_cls(
                     base_url=provider_config["base_url"],
@@ -93,6 +101,22 @@ class Context:
                     files_per_batch=provider_config.get("files_per_batch", 100),
                     authorize=provider_config.get("authorize", True),
                     workflow_uid=provider_config.get("workflow_uid") or None,
+                    version=__version__,
+                )
+            elif name == "xtm":
+                self._provider = provider_cls(
+                    base_url=provider_config["base_url"],
+                    client_name=require_env("XTM_CLIENT"),
+                    user_id=require_int_env("XTM_USER_ID"),
+                    password=require_env("XTM_PASSWORD"),
+                    customer_id=provider_config["customer_id"],
+                    source_language=provider_config.get("source_language") or None,
+                    template_id=provider_config.get("template_id") or None,
+                    workflow_id=provider_config.get("workflow_id") or None,
+                    workflow_name=provider_config.get("workflow_name") or None,
+                    filter_template_id=provider_config.get("filter_template_id") or None,
+                    start_workflow=provider_config.get("start_workflow", False),
+                    files_per_upload=provider_config.get("files_per_upload", 50),
                     version=__version__,
                 )
             else:
@@ -324,7 +348,7 @@ def init():
 @click.option("--force-resend", is_flag=True, help="Resubmit even if nothing changed since the last submitted push")
 @click.option(
     "--no-authorize", "no_authorize", is_flag=True,
-    help="Create the provider job unauthorized, overriding providers.smartling.authorize",
+    help="Submit without authorizing (Smartling) or starting the workflow (XTM), overriding config",
 )
 @click.option("--dry-run", is_flag=True)
 @pass_ctx

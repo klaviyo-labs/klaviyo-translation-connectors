@@ -3,6 +3,9 @@
 This guide takes you from nothing to a first round trip: Klaviyo → Smartling → Klaviyo.
 Plan on about 30 minutes, most of it spent creating credentials.
 
+Using XTM Cloud instead of Smartling? Follow this guide, but use [docs/xtm.md](xtm.md) in place of
+the Smartling parts of steps 3 and 6.
+
 - **Who it's for:** a developer or technical localization manager who can run a command-line tool.
 - **What you need:**
   - Klaviyo account admin access, to create an API key.
