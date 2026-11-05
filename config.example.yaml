@@ -1,5 +1,6 @@
 # Everything here is non-secret and safe to commit. Secrets come only from env vars:
-# KLAVIYO_API_KEY, SMARTLING_USER_IDENTIFIER, SMARTLING_USER_SECRET
+# KLAVIYO_API_KEY, plus SMARTLING_USER_IDENTIFIER and SMARTLING_USER_SECRET (Smartling)
+# or XTM_CLIENT, XTM_USER_ID and XTM_PASSWORD (XTM).
 klaviyo:
   base_url: https://a.klaviyo.com
   revision: "2026-07-15.pre"
@@ -15,7 +16,7 @@ klaviyo:
     universal_content: "2025-10-15"
 
 provider:
-  name: smartling
+  name: smartling             # or: xtm
 
 providers:
   smartling:
@@ -29,7 +30,21 @@ providers:
     # Sent to Smartling verbatim; our own parser ignores this.
     placeholder_format_custom: ['\{\{[^}]+\}\}', '\{%[^%]+%\}']
 
-locales:                      # klaviyo locale: provider locale
+  xtm:
+    # Your XTM URL plus /project-manager-api-rest, e.g. https://yourcompany.xtm-intl.com/project-manager-api-rest
+    base_url: https://api.xtm-cloud.com/project-manager-api-rest
+    customer_id: 0              # XTM customer that owns the projects
+    # Either a project template (languages, workflow and settings come from it) ...
+    template_id: 0              # 0 = no template
+    # ... or a source language plus a workflow, by id or by name.
+    source_language: en_US
+    workflow_id: 0              # 0 = use workflow_name instead
+    workflow_name: ""
+    filter_template_id: ""      # optional; an XTM file filter that protects {{ }} and {% %} tags
+    start_workflow: false       # true: start the XTM workflow once files are analysed
+    files_per_upload: 50
+
+locales:                      # klaviyo locale: provider locale (Smartling fr-FR, XTM fr_FR)
   fr: fr-FR
   de: de-DE
 

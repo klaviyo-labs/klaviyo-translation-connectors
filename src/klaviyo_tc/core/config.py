@@ -21,11 +21,17 @@ MAX_CONCURRENCY = 32
 DEFAULT_AUTHORIZE = True
 
 # YAML parses bare dates as `datetime.date`; normalize revisions back to `str`.
-SECRET_KEY_MARKERS = ("apikey", "secret", "token")
+SECRET_KEY_MARKERS = ("apikey", "secret", "token", "password")
+# Non-secret keys each provider can't run without; checked when that provider is selected.
+REQUIRED_PROVIDER_KEYS = {
+    "smartling": ("project_id",),
+    "xtm": ("base_url", "customer_id"),
+}
 
 # Single source of truth for config.example.yaml and `klaviyo-tc init`'s output.
 TEMPLATE = r"""# Everything here is non-secret and safe to commit. Secrets come only from env vars:
-# KLAVIYO_API_KEY, SMARTLING_USER_IDENTIFIER, SMARTLING_USER_SECRET
+# KLAVIYO_API_KEY, plus SMARTLING_USER_IDENTIFIER and SMARTLING_USER_SECRET (Smartling)
+# or XTM_CLIENT, XTM_USER_ID and XTM_PASSWORD (XTM).
 klaviyo:
   base_url: https://a.klaviyo.com
   revision: "2026-07-15.pre"
@@ -41,7 +47,7 @@ klaviyo:
     universal_content: "2025-10-15"
 
 provider:
-  name: smartling
+  name: smartling             # or: xtm
 
 providers:
   smartling:
@@ -55,7 +61,21 @@ providers:
     # Sent to Smartling verbatim; our own parser ignores this.
     placeholder_format_custom: ['\{\{[^}]+\}\}', '\{%[^%]+%\}']
 
-locales:                      # klaviyo locale: provider locale
+  xtm:
+    # Your XTM URL plus /project-manager-api-rest, e.g. https://yourcompany.xtm-intl.com/project-manager-api-rest
+    base_url: https://api.xtm-cloud.com/project-manager-api-rest
+    customer_id: 0              # XTM customer that owns the projects
+    # Either a project template (languages, workflow and settings come from it) ...
+    template_id: 0              # 0 = no template
+    # ... or a source language plus a workflow, by id or by name.
+    source_language: en_US
+    workflow_id: 0              # 0 = use workflow_name instead
+    workflow_name: ""
+    filter_template_id: ""      # optional; an XTM file filter that protects {{ }} and {% %} tags
+    start_workflow: false       # true: start the XTM workflow once files are analysed
+    files_per_upload: 50
+
+locales:                      # klaviyo locale: provider locale (Smartling fr-FR, XTM fr_FR)
   fr: fr-FR
   de: de-DE
 
@@ -114,6 +134,22 @@ def _check_no_secrets(node, path: str = "") -> None:
             _check_no_secrets(item, f"{path}[{index}]")
 
 
+def _check_xtm(provider_config: dict) -> None:
+    """XTM needs a template, or a source language plus a workflow (see POST /projects)."""
+    for key in ("customer_id", "template_id", "workflow_id"):
+        value = provider_config.get(key)
+        if value not in (None, "") and (not isinstance(value, int) or isinstance(value, bool)):
+            raise ConfigError(f"providers.xtm.{key} must be a whole number, got {value!r}")
+    if not provider_config.get("customer_id"):
+        raise ConfigError("providers.xtm.customer_id is required")
+    if provider_config.get("template_id"):
+        return
+    if not provider_config.get("source_language"):
+        raise ConfigError("providers.xtm.source_language is required when providers.xtm.template_id is not set")
+    if not (provider_config.get("workflow_id") or provider_config.get("workflow_name")):
+        raise ConfigError("providers.xtm needs template_id, workflow_id or workflow_name to pick the project's workflow")
+
+
 def load_config(path: str = DEFAULT_CONFIG_PATH) -> Config:
     config_path = Path(path)
     if not config_path.exists():
@@ -131,8 +167,10 @@ def load_config(path: str = DEFAULT_CONFIG_PATH) -> Config:
     provider_config = (raw.get("providers") or {}).get(provider_name)
     if provider_config is None:
         raise ConfigError(f"providers.{provider_name} is required")
-    if provider_name == "smartling":
-        _require(provider_config.get("project_id"), "providers.smartling.project_id")
+    for key in REQUIRED_PROVIDER_KEYS.get(provider_name, ()):
+        _require(provider_config.get(key), f"providers.{provider_name}.{key}")
+    if provider_name == "xtm":
+        _check_xtm(provider_config)
 
     concurrency = klaviyo_raw.get("concurrency", DEFAULT_CONCURRENCY)
     if not isinstance(concurrency, int) or isinstance(concurrency, bool) or not 1 <= concurrency <= MAX_CONCURRENCY:

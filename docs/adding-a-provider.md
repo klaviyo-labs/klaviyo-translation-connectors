@@ -55,14 +55,19 @@ envelopes, directives, auth) -- none of that belongs in `klaviyo_tc.core`.
 1. Create `klaviyo_tc/providers/<name>/` with your HTTP client and a class
    implementing `Provider` (see `klaviyo_tc/providers/smartling/` for a
    worked example: `client.py` is the plain REST client, `provider.py`
-   adapts it to the protocol).
+   adapts it to the protocol; `klaviyo_tc/providers/xtm/` is a second example
+   where one run becomes one project and downloads are generated asynchronously).
 2. Register it in `klaviyo_tc/providers/registry.py`.
 3. Add a `providers.<name>` section to the config schema
    (`klaviyo_tc/core/config.py`'s `TEMPLATE`, mirrored in `config.example.yaml`)
    for whatever settings your API needs (project id, format directives, etc.)
-   -- never secrets; `load_config` rejects any key that looks like one.
+   -- never secrets; `load_config` rejects any key that looks like one. List the keys your
+   provider can't run without in `REQUIRED_PROVIDER_KEYS`.
 4. Wire secret env vars and construction for your provider in
-   `klaviyo_tc.cli.Context.provider`.
+   `klaviyo_tc.cli.Context.provider`, and add any env var holding a secret to
+   `SECRET_ENV_VARS` in `klaviyo_tc/redact.py`. If your provider has an "authorize" or
+   "start work" step, expose it as a writable `authorize` attribute so `push --no-authorize`
+   can turn it off.
 5. Add tests (`click.testing.CliRunner` driving the CLI against `respx`-mocked
    HTTP) asserting on the requests your provider makes and on the resulting
    state, mirroring `tests/test_push.py` / `tests/test_pull.py` /

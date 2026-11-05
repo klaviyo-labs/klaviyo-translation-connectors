@@ -6,6 +6,7 @@ SECRET_ENV_VARS = (
     "KLAVIYO_API_KEY",
     "SMARTLING_USER_IDENTIFIER",
     "SMARTLING_USER_SECRET",
+    "XTM_PASSWORD",
 )
 
 # Tokens issued at runtime (not env vars); providers register these once obtained.
